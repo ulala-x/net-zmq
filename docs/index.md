@@ -70,14 +70,14 @@ See the [benchmarks documentation](https://github.com/ulala-x/net-zmq/blob/main/
 
 ## API Reference
 
-Browse the complete [API Reference](api/Net.Zmq.html) for detailed information about all classes, methods, and properties.
+Browse the complete [API Reference](../api/index.html) for detailed information about all classes, methods, and properties.
 
 ### Core Classes
 
-- **[Context](api/Net.Zmq.Context.html)**: ZeroMQ context management
-- **[Socket](api/Net.Zmq.Socket.html)**: Socket operations (send, receive, connect, bind)
-- **[Message](api/Net.Zmq.Message.html)**: Message frame handling
-- **[Poller](api/Net.Zmq.Poller.html)**: Multiplexing multiple sockets
+- **[Context](../api/Net.Zmq.Context.html)**: ZeroMQ context management
+- **[Socket](../api/Net.Zmq.Socket.html)**: Socket operations (send, receive, connect, bind)
+- **[Message](../api/Net.Zmq.Message.html)**: Message frame handling
+- **[Poller](../api/Net.Zmq.Poller.html)**: Multiplexing multiple sockets
 
 ## Platform Support
 
