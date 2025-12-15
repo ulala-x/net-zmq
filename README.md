@@ -3,6 +3,7 @@
 [![Build and Test](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml/badge.svg)](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml)
 [![NuGet](https://img.shields.io/nuget/v/Net.Zmq.svg)](https://www.nuget.org/packages/Net.Zmq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://ulala-x.github.io/net-zmq/)
 
 A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 
@@ -210,6 +211,16 @@ For comprehensive benchmark results including all patterns (PUSH/PULL, PUB/SUB, 
 | Windows | x64, ARM64 |
 | Linux | x64, ARM64 |
 | macOS | x64, ARM64 |
+
+## Documentation
+
+Complete API documentation is available at: [https://ulala-x.github.io/net-zmq/](https://ulala-x.github.io/net-zmq/)
+
+The documentation includes:
+- API Reference for all classes and methods
+- Usage examples and patterns
+- Performance benchmarks
+- Platform-specific guides
 
 ## Requirements
 

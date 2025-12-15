@@ -70,3 +70,9 @@ TestResult.xml
 nunit-*.xml
 # BenchmarkDotNet
 BenchmarkDotNet.Artifacts/
+
+# DocFX
+_site/
+api/
+obj/
+.manifest

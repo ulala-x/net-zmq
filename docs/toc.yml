@@ -1,0 +1,10 @@
+- name: Home
+  href: index.md
+- name: API Reference
+  href: ../api/
+- name: Benchmarks
+  href: https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md
+- name: Contributing
+  href: https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md
+- name: Changelog
+  href: https://github.com/ulala-x/net-zmq/blob/main/CHANGELOG.md

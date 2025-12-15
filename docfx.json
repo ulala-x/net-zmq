@@ -1,0 +1,67 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "src/Net.Zmq/**.csproj",
+            "src/Net.Zmq.Core/**.csproj"
+          ],
+          "exclude": [
+            "**/bin/**",
+            "**/obj/**"
+          ]
+        }
+      ],
+      "dest": "api",
+      "disableGitFeatures": false,
+      "disableDefaultFilter": false,
+      "properties": {
+        "TargetFramework": "net8.0"
+      }
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [
+          "api/**.yml",
+          "api/index.md"
+        ]
+      },
+      {
+        "files": [
+          "docs/**.md",
+          "docs/**/toc.yml",
+          "toc.yml",
+          "*.md"
+        ],
+        "exclude": [
+          "obj/**",
+          "_site/**"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "images/**"
+        ]
+      }
+    ],
+    "output": "_site",
+    "globalMetadata": {
+      "_appName": "Net.Zmq",
+      "_appTitle": "Net.Zmq Documentation",
+      "_enableSearch": true,
+      "_appFooter": "© 2024 Net.Zmq - Modern .NET binding for ZeroMQ"
+    },
+    "template": [
+      "default",
+      "modern"
+    ],
+    "postProcessors": [],
+    "keepFileLink": false,
+    "disableGitFeatures": false
+  }
+}
