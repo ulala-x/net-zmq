@@ -57,10 +57,9 @@
       "_appFooter": "© 2024 Net.Zmq - Modern .NET binding for ZeroMQ"
     },
     "template": [
-      "default",
-      "modern"
+      "default"
     ],
-    "postProcessors": [],
+    "postProcessors": ["ExtractSearchIndex"],
     "keepFileLink": false,
     "disableGitFeatures": false
   }
