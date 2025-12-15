@@ -8,7 +8,7 @@ A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 
 ## Features
 
-- **Modern .NET**: Built for .NET 8.0+ with LibraryImport source generators
+- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators (no runtime marshalling overhead)
 - **cppzmq Style**: Familiar API for developers coming from C++
 - **Type Safe**: Strongly-typed socket options, message properties, and enums
 - **Cross-Platform**: Supports Windows, Linux, and macOS (x64, ARM64)
