@@ -180,6 +180,29 @@ socket.SetOption(SocketOption.Linger, 0);
 int linger = socket.GetOption<int>(SocketOption.Linger);
 ```
 
+## Performance
+
+Net.Zmq delivers exceptional performance with **4.95M messages/sec throughput** and **202ns latency** at peak performance.
+
+### Highlights
+
+- **Peak Throughput**: 4.95M msg/sec (PUSH/PULL, 64B, Blocking mode)
+- **Ultra-Low Latency**: 202ns per message
+- **Memory Efficient**: 441B allocation per 10K messages
+- **Consistent**: All patterns achieve 4M+ msg/sec for small messages
+
+### Performance by Message Size
+
+| Message Size | Best Throughput | Latency | Pattern | Mode |
+|--------------|-----------------|---------|---------|------|
+| **64 bytes** | 4.95M/sec | 202ns | PUSH/PULL | Blocking |
+| **1 KB** | 1.36M/sec | 736ns | PUB/SUB | Blocking |
+| **64 KB** | 73.47K/sec | 13.61μs | ROUTER/ROUTER | Blocking |
+
+**Test Environment**: Intel Core Ultra 7 265K, .NET 8.0.22, Ubuntu 24.04.3 LTS
+
+For comprehensive benchmark results including all patterns (PUSH/PULL, PUB/SUB, ROUTER/ROUTER) and modes (Blocking, Non-Blocking, Poller), see [BENCHMARKS.md](BENCHMARKS.md).
+
 ## Supported Platforms
 
 | OS | Architecture |
