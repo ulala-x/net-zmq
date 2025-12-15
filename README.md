@@ -4,6 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/Net.Zmq.svg)](https://www.nuget.org/packages/Net.Zmq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://ulala-x.github.io/net-zmq/)
+[![Changelog](https://img.shields.io/badge/changelog-v0.1.0-green.svg)](CHANGELOG.md)
 
 A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 
