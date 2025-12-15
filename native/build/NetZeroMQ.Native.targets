@@ -25,20 +25,6 @@
     </Content>
   </ItemGroup>
 
-  <!-- Windows x86 -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x86' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$(NetZeroMQArch)' == 'X86')">
-    <None Include="$(MSBuildThisFileDirectory)..\runtimes\win-x86\native\libzmq.dll">
-      <Link>%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Visible>false</Visible>
-    </None>
-    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\win-x86\native\libzmq.dll">
-      <Link>%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Visible>false</Visible>
-    </Content>
-  </ItemGroup>
-
   <!-- Windows ARM64 -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$(NetZeroMQArch)' == 'Arm64')">
     <None Include="$(MSBuildThisFileDirectory)..\runtimes\win-arm64\native\libzmq.dll">
