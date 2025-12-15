@@ -1,10 +1,26 @@
 - name: Home
   href: index.md
+- name: Getting Started
+  href: getting-started.md
+- name: Messaging Patterns
+  href: patterns.md
+- name: API Usage
+  href: api-usage.md
+- name: Advanced Topics
+  href: advanced-topics.md
+- name: Samples
+  href: samples.md
 - name: API Reference
   href: ../api/
-- name: Benchmarks
-  href: https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md
-- name: Contributing
-  href: https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md
-- name: Changelog
-  href: https://github.com/ulala-x/net-zmq/blob/main/CHANGELOG.md
+- name: External Resources
+  items:
+  - name: Benchmarks
+    href: https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md
+  - name: Changelog
+    href: https://github.com/ulala-x/net-zmq/blob/main/CHANGELOG.md
+  - name: Contributing
+    href: https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md
+  - name: GitHub Repository
+    href: https://github.com/ulala-x/net-zmq
+  - name: ZeroMQ Guide
+    href: https://zguide.zeromq.org/

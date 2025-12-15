@@ -8,12 +8,12 @@ A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 
 ## Features
 
-- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators (no runtime marshalling overhead)
-- **cppzmq Style**: Familiar API for developers coming from C++
+- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators
+- **High Performance**: 4.95M messages/sec throughput, 202ns latency
 - **Type Safe**: Strongly-typed socket options, message properties, and enums
-- **Cross-Platform**: Supports Windows, Linux, and macOS (x64, ARM64)
+- **Cross-Platform**: Windows, Linux, macOS (x64, ARM64)
 - **Safe by Default**: SafeHandle-based resource management
-- **High Performance**: 4.95M messages/sec throughput with 202ns latency
+- **cppzmq Style**: Familiar API for C++ developers
 
 ## Quick Start
 
@@ -23,104 +23,112 @@ A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 dotnet add package Net.Zmq
 ```
 
-### REQ-REP Pattern
+### Request-Reply Example
 
 ```csharp
 using Net.Zmq;
+
+using var context = new Context();
 
 // Server
-using var ctx = new Context();
-using var server = new Socket(ctx, SocketType.Rep);
+using var server = new Socket(context, SocketType.Rep);
 server.Bind("tcp://*:5555");
 
-var request = server.RecvString();
-server.Send("World");
-
 // Client
-using var client = new Socket(ctx, SocketType.Req);
+using var client = new Socket(context, SocketType.Req);
 client.Connect("tcp://localhost:5555");
+
+// Communication
 client.Send("Hello");
-var reply = client.RecvString();
+var request = server.RecvString();  // "Hello"
+server.Send("World");
+var reply = client.RecvString();    // "World"
 ```
 
-### PUB-SUB Pattern
+### Publish-Subscribe Example
 
 ```csharp
 using Net.Zmq;
 
+using var context = new Context();
+
 // Publisher
-using var ctx = new Context();
-using var pub = new Socket(ctx, SocketType.Pub);
-pub.Bind("tcp://*:5556");
-pub.Send("topic1 Hello subscribers!");
+using var publisher = new Socket(context, SocketType.Pub);
+publisher.Bind("tcp://*:5556");
+publisher.Send("weather.tokyo 25°C");
 
 // Subscriber
-using var sub = new Socket(ctx, SocketType.Sub);
-sub.Connect("tcp://localhost:5556");
-sub.Subscribe("topic1");
-var message = sub.RecvString();
+using var subscriber = new Socket(context, SocketType.Sub);
+subscriber.Connect("tcp://localhost:5556");
+subscriber.Subscribe("weather.");
+var update = subscriber.RecvString();  // "weather.tokyo 25°C"
 ```
 
 ## Documentation
 
-- [Getting Started Guide](docs/index.md) - Complete documentation and examples
-- [API Reference](api/index.md) - Detailed API documentation
-- [Performance Benchmarks](https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md) - Performance metrics
+Complete documentation is available at **[https://ulala-x.github.io/net-zmq/](https://ulala-x.github.io/net-zmq/)**
+
+### Quick Links
+
+- **[Getting Started](docs/getting-started.md)** - Installation and basic concepts
+- **[Messaging Patterns](docs/patterns.md)** - REQ-REP, PUB-SUB, PUSH-PULL, and more
+- **[API Usage Guide](docs/api-usage.md)** - Detailed API documentation
+- **[Advanced Topics](docs/advanced-topics.md)** - Performance tuning and best practices
+- **[API Reference](api/index.html)** - Complete API documentation
 
 ## Performance
 
-Net.Zmq delivers exceptional performance with **4.95M messages/sec throughput** and **202ns latency** at peak performance.
+Net.Zmq delivers exceptional performance:
 
-### Highlights
-
-- **Peak Throughput**: 4.95M msg/sec (PUSH/PULL, 64B, Blocking mode)
-- **Ultra-Low Latency**: 202ns per message
-- **Memory Efficient**: 441B allocation per 10K messages
-- **Consistent**: All patterns achieve 4M+ msg/sec for small messages
-
-### Performance by Message Size
-
-| Message Size | Best Throughput | Latency | Pattern | Mode |
-|--------------|-----------------|---------|---------|------|
-| **64 bytes** | 4.95M/sec | 202ns | PUSH/PULL | Blocking |
-| **1 KB** | 1.36M/sec | 736ns | PUB/SUB | Blocking |
-| **64 KB** | 73.47K/sec | 13.61μs | ROUTER/ROUTER | Blocking |
+| Message Size | Throughput | Latency | Pattern |
+|--------------|------------|---------|---------|
+| 64 bytes | 4.95M/sec | 202ns | PUSH/PULL |
+| 1 KB | 1.36M/sec | 736ns | PUB/SUB |
+| 64 KB | 73.47K/sec | 13.61μs | ROUTER/ROUTER |
 
 **Test Environment**: Intel Core Ultra 7 265K, .NET 8.0.22, Ubuntu 24.04.3 LTS
 
+See [BENCHMARKS.md](https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md) for detailed benchmarks.
+
 ## Supported Platforms
 
-| OS | Architecture |
-|----|--------------|
-| Windows | x64, ARM64 |
-| Linux | x64, ARM64 |
-| macOS | x64, ARM64 |
+| OS | Architecture | Status |
+|----|--------------|--------|
+| Windows | x64, ARM64 | ✅ Supported |
+| Linux | x64, ARM64 | ✅ Supported |
+| macOS | x64, ARM64 | ✅ Supported |
 
 ## Socket Types
 
-| Type | Description |
-|------|-------------|
-| `SocketType.Req` | Request socket (client) |
-| `SocketType.Rep` | Reply socket (server) |
-| `SocketType.Pub` | Publish socket |
-| `SocketType.Sub` | Subscribe socket |
-| `SocketType.Push` | Push socket (pipeline) |
-| `SocketType.Pull` | Pull socket (pipeline) |
-| `SocketType.Dealer` | Async request |
-| `SocketType.Router` | Async reply |
-| `SocketType.Pair` | Exclusive pair |
+Net.Zmq supports all ZeroMQ socket types:
+
+| Type | Description | Pattern |
+|------|-------------|---------|
+| `Req` | Request | Client-Server |
+| `Rep` | Reply | Client-Server |
+| `Pub` | Publish | Pub-Sub |
+| `Sub` | Subscribe | Pub-Sub |
+| `Push` | Push | Pipeline |
+| `Pull` | Pull | Pipeline |
+| `Dealer` | Async Request | Advanced |
+| `Router` | Async Reply | Advanced |
+| `Pair` | Exclusive Pair | Peer-to-Peer |
 
 ## Requirements
 
-- .NET 8.0 or later
-- Native libzmq library (automatically provided via Net.Zmq.Native package)
+- **.NET 8.0 or later**
+- **libzmq native library** (automatically included via Net.Zmq.Native package)
+
+## Contributing
+
+Contributions are welcome! Please see the [Contributing Guide](https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md) for details.
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/ulala-x/net-zmq/blob/main/LICENSE) for details.
+Net.Zmq is licensed under the [MIT License](https://github.com/ulala-x/net-zmq/blob/main/LICENSE).
 
 ## Related Projects
 
 - [libzmq](https://github.com/zeromq/libzmq) - ZeroMQ core library
 - [cppzmq](https://github.com/zeromq/cppzmq) - C++ binding (API inspiration)
-- [libzmq-native](https://github.com/ulala-x/libzmq-native) - Native binaries
+- [libzmq-native](https://github.com/ulala-x/libzmq-native) - Native binaries for Net.Zmq

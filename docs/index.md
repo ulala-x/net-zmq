@@ -1,108 +1,155 @@
 # Net.Zmq Documentation
 
-Welcome to the Net.Zmq documentation! Net.Zmq is a modern .NET 8+ binding for ZeroMQ (libzmq) with a cppzmq-style API.
+Welcome to Net.Zmq! A modern .NET 8+ binding for ZeroMQ with a cppzmq-style API, delivering high-performance message queuing for distributed applications.
 
-## Overview
+## What is Net.Zmq?
 
-Net.Zmq provides high-performance message queuing for distributed applications with a familiar, easy-to-use API inspired by cppzmq.
+Net.Zmq is a .NET wrapper for ZeroMQ (libzmq), providing a clean, type-safe API for building distributed systems. It combines the power of ZeroMQ with modern .NET features like source generators and SafeHandles.
 
 ### Key Features
 
-- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators (no runtime marshalling overhead)
-- **cppzmq Style**: Familiar API for developers coming from C++
-- **Type Safe**: Strongly-typed socket options, message properties, and enums
-- **Cross-Platform**: Supports Windows, Linux, and macOS (x64, ARM64)
+- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators
+- **High Performance**: 4.95M messages/sec throughput, 202ns latency
+- **Type Safe**: Strongly-typed socket options and enums
+- **Cross-Platform**: Windows, Linux, macOS (x64, ARM64)
 - **Safe by Default**: SafeHandle-based resource management
-- **High Performance**: 4.95M messages/sec throughput with 202ns latency
+- **cppzmq Style**: Familiar API for C++ developers
 
-## Getting Started
+## Quick Start
 
-### Installation
-
-Install Net.Zmq via NuGet:
+Install via NuGet:
 
 ```bash
 dotnet add package Net.Zmq
 ```
 
-### Quick Example
+Simple request-reply example:
 
 ```csharp
 using Net.Zmq;
 
-// Create a context
-using var ctx = new Context();
+using var context = new Context();
 
 // Server
-using var server = new Socket(ctx, SocketType.Rep);
+using var server = new Socket(context, SocketType.Rep);
 server.Bind("tcp://*:5555");
 
 // Client
-using var client = new Socket(ctx, SocketType.Req);
+using var client = new Socket(context, SocketType.Req);
 client.Connect("tcp://localhost:5555");
 
-// Send and receive
+// Communication
 client.Send("Hello");
-var message = server.RecvString();
+var request = server.RecvString();  // "Hello"
 server.Send("World");
-var reply = client.RecvString();
+var reply = client.RecvString();    // "World"
 ```
 
-## Messaging Patterns
+## Documentation Guide
 
-Net.Zmq supports all standard ZeroMQ patterns:
+### For Beginners
 
-- **Request-Reply**: Synchronous client-server pattern
-- **Publish-Subscribe**: One-to-many distribution pattern
-- **Push-Pull**: Load-balanced pipeline pattern
-- **Router-Dealer**: Asynchronous request-reply pattern
-- **Pair**: Exclusive connection between two peers
+Start with these guides to learn Net.Zmq from the ground up:
+
+- **[Getting Started](getting-started.md)** - Installation, basic concepts, and your first application
+- **[Messaging Patterns](patterns.md)** - REQ-REP, PUB-SUB, PUSH-PULL, and more
+
+### For Developers
+
+Deep dive into the API and advanced usage:
+
+- **[API Usage Guide](api-usage.md)** - Detailed guide on Context, Socket, Message, and Poller
+- **[Advanced Topics](advanced-topics.md)** - Performance tuning, best practices, security, and troubleshooting
+
+### Reference
+
+- **[API Reference](../api/index.html)** - Complete API documentation for all classes and methods
+
+## Core Concepts
+
+### Context
+
+The context manages ZeroMQ resources (I/O threads, sockets). Create one per application:
+
+```csharp
+using var context = new Context();
+```
+
+### Socket Types
+
+Net.Zmq supports all ZeroMQ socket types:
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| REQ | Request | Client in client-server |
+| REP | Reply | Server in client-server |
+| PUB | Publish | Publisher in pub-sub |
+| SUB | Subscribe | Subscriber in pub-sub |
+| PUSH | Push | Producer in pipeline |
+| PULL | Pull | Consumer in pipeline |
+| DEALER | Dealer | Async request |
+| ROUTER | Router | Async reply with routing |
+| PAIR | Pair | Exclusive peer-to-peer |
+
+### Messaging Patterns
+
+Choose the right pattern for your use case:
+
+- **Request-Reply (REQ-REP)**: Synchronous client-server communication
+- **Publish-Subscribe (PUB-SUB)**: One-to-many message distribution
+- **Push-Pull (Pipeline)**: Load-balanced work distribution
+- **Router-Dealer**: Asynchronous request-reply with advanced routing
+- **Pair**: Exclusive bidirectional connection
+
+See the [Messaging Patterns](patterns.md) guide for detailed examples.
 
 ## Performance
 
 Net.Zmq delivers exceptional performance:
 
-- **Peak Throughput**: 4.95M msg/sec (PUSH/PULL, 64B)
-- **Ultra-Low Latency**: 202ns per message
-- **Memory Efficient**: 441B allocation per 10K messages
+| Message Size | Throughput | Latency | Pattern |
+|--------------|------------|---------|---------|
+| 64 bytes | 4.95M/sec | 202ns | PUSH/PULL |
+| 1 KB | 1.36M/sec | 736ns | PUB/SUB |
+| 64 KB | 73.47K/sec | 13.61μs | ROUTER/ROUTER |
 
-See the [benchmarks documentation](https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md) for detailed performance metrics.
+**Test Environment**: Intel Core Ultra 7 265K, .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-## API Reference
-
-Browse the complete [API Reference](../api/index.html) for detailed information about all classes, methods, and properties.
-
-### Core Classes
-
-- **[Context](../api/Net.Zmq.Context.html)**: ZeroMQ context management
-- **[Socket](../api/Net.Zmq.Socket.html)**: Socket operations (send, receive, connect, bind)
-- **[Message](../api/Net.Zmq.Message.html)**: Message frame handling
-- **[Poller](../api/Net.Zmq.Poller.html)**: Multiplexing multiple sockets
+See [BENCHMARKS.md](https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md) for comprehensive performance metrics.
 
 ## Platform Support
 
-| Platform | Architecture |
-|----------|--------------|
-| Windows  | x64, ARM64   |
-| Linux    | x64, ARM64   |
-| macOS    | x64, ARM64   |
+| OS | Architecture | Status |
+|----|--------------|--------|
+| Windows | x64, ARM64 | ✅ Supported |
+| Linux | x64, ARM64 | ✅ Supported |
+| macOS | x64, ARM64 | ✅ Supported |
 
 ## Requirements
 
-- .NET 8.0 or later
-- Native libzmq library (automatically provided via Net.Zmq.Native package)
+- **.NET 8.0 or later**
+- **libzmq native library** (automatically included via Net.Zmq.Native package)
 
-## Contributing
+## Additional Resources
 
-Contributions are welcome! Please see the [contributing guide](https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md) for details.
+### Project Links
+
+- [GitHub Repository](https://github.com/ulala-x/net-zmq) - Source code, issues, discussions
+- [NuGet Package](https://www.nuget.org/packages/Net.Zmq) - Latest releases
+- [Changelog](https://github.com/ulala-x/net-zmq/blob/main/CHANGELOG.md) - Release history
+
+### ZeroMQ Resources
+
+- [ZeroMQ Guide](https://zguide.zeromq.org/) - Comprehensive guide to ZeroMQ patterns
+- [libzmq Documentation](https://libzmq.readthedocs.io/) - Core library documentation
+- [cppzmq](https://github.com/zeromq/cppzmq) - C++ binding (API inspiration)
+
+### Community
+
+- [Contributing Guide](https://github.com/ulala-x/net-zmq/blob/main/CONTRIBUTING.md) - How to contribute
+- [GitHub Discussions](https://github.com/ulala-x/net-zmq/discussions) - Ask questions and share ideas
+- [GitHub Issues](https://github.com/ulala-x/net-zmq/issues) - Report bugs and request features
 
 ## License
 
-Net.Zmq is licensed under the MIT License. See [LICENSE](https://github.com/ulala-x/net-zmq/blob/main/LICENSE) for details.
-
-## Resources
-
-- [GitHub Repository](https://github.com/ulala-x/net-zmq)
-- [NuGet Package](https://www.nuget.org/packages/Net.Zmq)
-- [ZeroMQ Guide](https://zguide.zeromq.org/)
-- [libzmq Documentation](https://libzmq.readthedocs.io/)
+Net.Zmq is open source software licensed under the [MIT License](https://github.com/ulala-x/net-zmq/blob/main/LICENSE).
