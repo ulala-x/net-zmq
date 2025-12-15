@@ -11,7 +11,7 @@ A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 - **Modern .NET**: Built for .NET 8.0+ with LibraryImport source generators
 - **cppzmq Style**: Familiar API for developers coming from C++
 - **Type Safe**: Strongly-typed socket options, message properties, and enums
-- **Cross-Platform**: Supports Windows (x64), Linux (x64), and macOS (x64, ARM64)
+- **Cross-Platform**: Supports Windows, Linux, and macOS (x64, ARM64)
 - **Safe by Default**: SafeHandle-based resource management
 
 ## Installation
@@ -184,8 +184,8 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 | OS | Architecture |
 |----|--------------|
-| Windows | x64 |
-| Linux | x64 |
+| Windows | x64, ARM64 |
+| Linux | x64, ARM64 |
 | macOS | x64, ARM64 |
 
 ## Requirements
