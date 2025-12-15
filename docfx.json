@@ -54,12 +54,12 @@
       "_appName": "Net.Zmq",
       "_appTitle": "Net.Zmq Documentation",
       "_enableSearch": true,
-      "_appFooter": "© 2024 Net.Zmq - Modern .NET binding for ZeroMQ",
-      "_appTheme": "dark"
+      "_appFooter": "© 2024 Net.Zmq - Modern .NET binding for ZeroMQ"
     },
     "template": [
       "default",
-      "modern"
+      "modern",
+      "templates/modern"
     ],
     "postProcessors": ["ExtractSearchIndex"],
     "keepFileLink": false,
