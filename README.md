@@ -180,6 +180,14 @@ socket.SetOption(SocketOption.Linger, 0);
 int linger = socket.GetOption<int>(SocketOption.Linger);
 ```
 
+## Supported Platforms
+
+| OS | Architecture |
+|----|--------------|
+| Windows | x64 |
+| Linux | x64 |
+| macOS | x64, ARM64 |
+
 ## Requirements
 
 - .NET 8.0 or later
