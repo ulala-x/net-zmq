@@ -30,20 +30,20 @@ jobs:
 
     - name: Verify native library copied
       run: |
-        echo "=== NetZeroMQ.Tests output ==="
-        dir tests\NetZeroMQ.Tests\bin\Release\net8.0\*.dll | findstr libzmq
-        echo "=== NetZeroMQ.Core.Tests output ==="
-        dir tests\NetZeroMQ.Core.Tests\bin\Release\net8.0\*.dll | findstr libzmq
+        echo "=== Net.Zmq.Tests output ==="
+        dir tests\Net.Zmq.Tests\bin\Release\net8.0\*.dll | findstr libzmq
+        echo "=== Net.Zmq.Core.Tests output ==="
+        dir tests\Net.Zmq.Core.Tests\bin\Release\net8.0\*.dll | findstr libzmq
       shell: cmd
 
     - name: Test Unit
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
 
     - name: Test Integration
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
 
     - name: Test Core
-      run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -70,19 +70,19 @@ jobs:
 
     - name: Verify native library copied
       run: |
-        echo "=== NetZeroMQ.Tests output ==="
-        ls -la tests/NetZeroMQ.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
-        echo "=== NetZeroMQ.Core.Tests output ==="
-        ls -la tests/NetZeroMQ.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+        echo "=== Net.Zmq.Tests output ==="
+        ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+        echo "=== Net.Zmq.Core.Tests output ==="
+        ls -la tests/Net.Zmq.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
 
     - name: Test Unit
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
 
     - name: Test Integration
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
 
     - name: Test Core
-      run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-linux-arm64:
     runs-on: ubuntu-22.04-arm
@@ -109,19 +109,19 @@ jobs:
 
     - name: Verify native library copied
       run: |
-        echo "=== NetZeroMQ.Tests output ==="
-        ls -la tests/NetZeroMQ.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
-        echo "=== NetZeroMQ.Core.Tests output ==="
-        ls -la tests/NetZeroMQ.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+        echo "=== Net.Zmq.Tests output ==="
+        ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+        echo "=== Net.Zmq.Core.Tests output ==="
+        ls -la tests/Net.Zmq.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
 
     - name: Test Unit
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
 
     - name: Test Integration
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
 
     - name: Test Core
-      run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-macos-arm64:
     runs-on: macos-15
@@ -149,19 +149,19 @@ jobs:
 
     - name: Verify native library copied
       run: |
-        echo "=== NetZeroMQ.Tests output ==="
-        ls -la tests/NetZeroMQ.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
-        echo "=== NetZeroMQ.Core.Tests output ==="
-        ls -la tests/NetZeroMQ.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
+        echo "=== Net.Zmq.Tests output ==="
+        ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
+        echo "=== Net.Zmq.Core.Tests output ==="
+        ls -la tests/Net.Zmq.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
 
     - name: Test Unit
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
 
     - name: Test Integration
-      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
 
     - name: Test Core
-      run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-macos-x64:
     runs-on: macos-15
@@ -193,19 +193,19 @@ jobs:
 
     - name: Verify native library copied
       run: |
-        echo "=== NetZeroMQ.Tests output ==="
-        ls -la tests/NetZeroMQ.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
-        echo "=== NetZeroMQ.Core.Tests output ==="
-        ls -la tests/NetZeroMQ.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
+        echo "=== Net.Zmq.Tests output ==="
+        ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
+        echo "=== Net.Zmq.Core.Tests output ==="
+        ls -la tests/Net.Zmq.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
 
     - name: Test Unit
-      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
 
     - name: Test Integration
-      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
 
     - name: Test Core
-      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   pack:
     runs-on: ubuntu-22.04

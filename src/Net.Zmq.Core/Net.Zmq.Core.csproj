@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Net.Zmq.Core</PackageId>
+    <Description>Low-level P/Invoke bindings for libzmq</Description>
+    <PackageTags>zmq zeromq libzmq pinvoke native</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Suppress missing XML comment warnings for internal types -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Net.Zmq" />
+    <InternalsVisibleTo Include="Net.Zmq.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Net.Zmq.Native\Net.Zmq.Native.csproj">
+      <PrivateAssets>none</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,45 @@
+using System.Runtime.InteropServices;
+using Net.Zmq.Core.Native;
+
+namespace Net.Zmq.Core.SafeHandles;
+
+/// <summary>
+/// Safe handle for ZeroMQ socket resources.
+/// </summary>
+public sealed class ZmqSocketHandle : SafeHandle
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ZmqSocketHandle"/> class.
+    /// </summary>
+    public ZmqSocketHandle() : base(IntPtr.Zero, true)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ZmqSocketHandle"/> class with an existing handle.
+    /// </summary>
+    /// <param name="existingHandle">The existing handle value.</param>
+    /// <param name="ownsHandle">true if the handle should be released when this instance is disposed; otherwise, false.</param>
+    public ZmqSocketHandle(nint existingHandle, bool ownsHandle)
+        : base(existingHandle, ownsHandle)
+    {
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the handle is invalid.
+    /// </summary>
+    public override bool IsInvalid => handle == IntPtr.Zero;
+
+    /// <summary>
+    /// Releases the ZeroMQ socket handle.
+    /// </summary>
+    /// <returns>true if the handle was released successfully; otherwise, false.</returns>
+    protected override bool ReleaseHandle()
+    {
+        if (handle != IntPtr.Zero)
+        {
+            return LibZmq.Close(handle) == 0;
+        }
+        return true;
+    }
+}

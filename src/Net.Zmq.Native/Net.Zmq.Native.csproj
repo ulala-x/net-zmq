@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>Net.Zmq.Native</PackageId>
+    <Description>Native libzmq binaries for Net.Zmq - Cross-platform ZeroMQ native libraries</Description>
+    <Version>0.1.0</Version>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+
+    <!-- Package metadata -->
+    <PackageTags>zmq zeromq libzmq native native-binaries cross-platform</PackageTags>
+    <PackageProjectUrl>https://github.com/ulala-x/net-zmq</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ulala-x/net-zmq</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Authors>ulala-x</Authors>
+    <Company>ulala-x</Company>
+    <Copyright>Copyright (c) 2025 ulala-x</Copyright>
+
+    <!-- Runtime identifier support -->
+    <RuntimeIdentifiers>win-x64;win-x86;win-arm64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Native binaries - runtimes 폴더 -->
+    <None Include="..\..\native\runtimes\**\*"
+          Exclude="..\..\native\runtimes\**\.gitkeep"
+          Pack="true"
+          PackagePath="runtimes\"
+          Condition="Exists('..\..\native\runtimes\')" />
+
+    <!-- Build targets -->
+    <None Include="..\..\native\build\Net.Zmq.Native.targets"
+          Pack="true"
+          PackagePath="build\Net.Zmq.Native.targets" />
+    <None Include="..\..\native\build\Net.Zmq.Native.targets"
+          Pack="true"
+          PackagePath="buildTransitive\Net.Zmq.Native.targets" />
+  </ItemGroup>
+</Project>

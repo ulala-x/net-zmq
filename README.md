@@ -1,7 +1,7 @@
-# NetZeroMQ
+# Net.Zmq
 
-[![Build and Test](https://github.com/ulala-x/netzeromq/actions/workflows/build.yml/badge.svg)](https://github.com/ulala-x/netzeromq/actions/workflows/build.yml)
-[![NuGet](https://img.shields.io/nuget/v/NetZeroMQ.svg)](https://www.nuget.org/packages/NetZeroMQ)
+[![Build and Test](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml/badge.svg)](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml)
+[![NuGet](https://img.shields.io/nuget/v/Net.Zmq.svg)](https://www.nuget.org/packages/Net.Zmq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
@@ -17,7 +17,7 @@ A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
 ## Installation
 
 ```bash
-dotnet add package NetZeroMQ
+dotnet add package Net.Zmq
 ```
 
 ## Quick Start
@@ -25,7 +25,7 @@ dotnet add package NetZeroMQ
 ### REQ-REP Pattern
 
 ```csharp
-using NetZeroMQ;
+using Net.Zmq;
 
 // Server
 using var ctx = new Context();
@@ -45,7 +45,7 @@ var reply = client.RecvString();
 ### PUB-SUB Pattern
 
 ```csharp
-using NetZeroMQ;
+using Net.Zmq;
 
 // Publisher
 using var ctx = new Context();
@@ -64,7 +64,7 @@ var message = sub.RecvString();
 
 ```csharp
 using System.Text;
-using NetZeroMQ;
+using Net.Zmq;
 
 using var ctx = new Context();
 using var peerA = new Socket(ctx, SocketType.Router);
@@ -93,7 +93,7 @@ peerA.Send("Hello back from Peer A!");
 ### Polling
 
 ```csharp
-using NetZeroMQ;
+using Net.Zmq;
 
 var items = new PollItem[]
 {
@@ -111,7 +111,7 @@ if (Poller.Poll(items, timeout: 1000) > 0)
 ### Message API
 
 ```csharp
-using NetZeroMQ;
+using Net.Zmq;
 
 // Create and send message
 using var msg = new Message("Hello World");
@@ -191,7 +191,7 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 ## Requirements
 
 - .NET 8.0 or later
-- Native libzmq library (automatically provided via NetZeroMQ.Native package)
+- Native libzmq library (automatically provided via Net.Zmq.Native package)
 
 ## License
 
