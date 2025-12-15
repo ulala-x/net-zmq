@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
       run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
 
@@ -84,8 +84,47 @@ jobs:
     - name: Test Core
       run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
+  build-linux-arm64:
+    runs-on: ubuntu-22.04-arm
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Set native library permissions
+      run: |
+        chmod +x native/runtimes/linux-arm64/native/libzmq.so
+        ls -la native/runtimes/linux-arm64/native/
+        echo "=== Library dependencies ==="
+        ldd native/runtimes/linux-arm64/native/libzmq.so || true
+
+    - name: Restore
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Verify native library copied
+      run: |
+        echo "=== NetZeroMQ.Tests output ==="
+        ls -la tests/NetZeroMQ.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+        echo "=== NetZeroMQ.Core.Tests output ==="
+        ls -la tests/NetZeroMQ.Core.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
+
+    - name: Test Unit
+      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/NetZeroMQ.Tests/NetZeroMQ.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
   build-macos-arm64:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
     - uses: actions/checkout@v4
 
@@ -125,7 +164,7 @@ jobs:
       run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-macos-x64:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
     - uses: actions/checkout@v4
 
@@ -169,8 +208,8 @@ jobs:
       run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   pack:
-    runs-on: ubuntu-latest
-    needs: [build-windows, build-linux, build-macos-arm64, build-macos-x64]
+    runs-on: ubuntu-22.04
+    needs: [build-windows, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x64]
     steps:
     - uses: actions/checkout@v4
 
