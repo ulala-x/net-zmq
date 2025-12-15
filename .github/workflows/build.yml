@@ -46,7 +46,7 @@ jobs:
       run: dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
 
@@ -208,7 +208,7 @@ jobs:
       run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/NetZeroMQ.Core.Tests/NetZeroMQ.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
   pack:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build-windows, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x64]
     steps:
     - uses: actions/checkout@v4
