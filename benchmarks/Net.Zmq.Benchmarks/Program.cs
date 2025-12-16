@@ -22,19 +22,6 @@ public class Program
             return;
         }
 
-        // Check for --mode-test flag to verify Blocking vs NonBlocking
-        if (args.Contains("--mode-test"))
-        {
-            ModeTest.Run();
-            return;
-        }
-
-        // Check for --alloc-test flag to check memory allocation
-        if (args.Contains("--alloc-test"))
-        {
-            AllocTest.Run();
-            return;
-        }
 
         // Check for --quick flag for fast Dry run mode
         bool isQuick = args.Contains("--quick");
@@ -66,121 +53,8 @@ public class Program
     private static void RunDiagnostic()
     {
         Console.WriteLine("=== Running Diagnostic Tests ===\n");
-
-        TestPushPull();
-        TestPubSub();
-        TestReqRep();
         TestRouterRouter();
-
         Console.WriteLine("\n=== All tests completed! ===");
-    }
-
-    private static void TestPushPull()
-    {
-        Console.Write("Testing PUSH/PULL... ");
-        try
-        {
-            using var ctx = new Net.Zmq.Context();
-            using var pull = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Pull);
-            using var push = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Push);
-
-            pull.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            pull.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            pull.Bind("tcp://127.0.0.1:15580");
-
-            push.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            push.Connect("tcp://127.0.0.1:15580");
-
-            Thread.Sleep(100);
-
-            var data = new byte[] { 1, 2, 3 };
-            push.Send(data);
-
-            using var msg = new Net.Zmq.Message(16);
-            pull.Recv(msg);
-
-            Console.WriteLine("OK");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"FAILED: {ex.Message}");
-        }
-    }
-
-    private static void TestPubSub()
-    {
-        Console.Write("Testing PUB/SUB... ");
-        try
-        {
-            using var ctx = new Net.Zmq.Context();
-            using var pub = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Pub);
-            using var sub = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Sub);
-
-            pub.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            pub.Bind("tcp://127.0.0.1:15581");
-
-            sub.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            sub.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            sub.Subscribe("");
-            sub.Connect("tcp://127.0.0.1:15581");
-
-            Thread.Sleep(200); // PUB/SUB needs more time
-
-            var data = new byte[] { 1, 2, 3 };
-            pub.Send(data);
-
-            using var msg = new Net.Zmq.Message(16);
-            sub.Recv(msg);
-
-            Console.WriteLine("OK");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"FAILED: {ex.Message}");
-        }
-    }
-
-    private static void TestReqRep()
-    {
-        Console.Write("Testing REQ/REP... ");
-        try
-        {
-            using var ctx = new Net.Zmq.Context();
-            using var rep = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Rep);
-            using var req = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Req);
-
-            rep.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            rep.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            rep.Bind("tcp://127.0.0.1:15582");
-
-            req.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            req.SetOption(Net.Zmq.SocketOption.Linger, 0);
-            req.Connect("tcp://127.0.0.1:15582");
-
-            Thread.Sleep(100);
-
-            var data = new byte[] { 1, 2, 3 };
-
-            // REQ sends first
-            req.Send(data);
-
-            // REP receives
-            using var msg = new Net.Zmq.Message(16);
-            rep.Recv(msg);
-
-            // REP replies
-            rep.Send(data);
-
-            // REQ receives reply
-            msg.Rebuild(16);
-            req.Recv(msg);
-
-            Console.WriteLine("OK");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"FAILED: {ex.Message}");
-        }
     }
 
     private static void TestRouterRouter()

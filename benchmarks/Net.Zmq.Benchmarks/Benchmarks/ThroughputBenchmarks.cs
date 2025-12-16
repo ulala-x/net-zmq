@@ -127,7 +127,7 @@ public class ThroughputBenchmarks
     [Benchmark(Baseline = true)]
     public void PushPull_Throughput() => Run(
         _pull,
-        () => _push.Send(_sendData),
+        () => _push.Send(_sendData,SendFlags.SendMore),
         () => _pull.Recv(_recvBuffer),
         () => _pull.TryRecv(_recvBuffer, out _)
     );
@@ -135,7 +135,7 @@ public class ThroughputBenchmarks
     [Benchmark]
     public void PubSub_Throughput() => Run(
         _sub,
-        () => _pub.Send(_sendData),
+        () => _pub.Send(_sendData, SendFlags.SendMore),
         () => _sub.Recv(_recvBuffer),
         () => _sub.TryRecv(_recvBuffer, out _)
     );
