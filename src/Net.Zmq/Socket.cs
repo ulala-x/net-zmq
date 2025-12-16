@@ -307,16 +307,9 @@ public sealed class Socket : IDisposable
     /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
     public string RecvString(RecvFlags flags = RecvFlags.None)
     {
-        var msg = MessagePool.Rent();
-        try
-        {
-            msg.Recv(Handle, flags);
-            return msg.ToString();
-        }
-        finally
-        {
-            MessagePool.Return(msg);
-        }
+        using var msg = new Message();
+        msg.Recv(Handle, flags);
+        return msg.ToString();
     }
 
     /// <summary>
@@ -391,7 +384,7 @@ public sealed class Socket : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         flags |= RecvFlags.DontWait;
-        var msg = MessagePool.Rent();
+        using var msg = new Message();
         try
         {
             var result = msg.Recv(Handle, flags);
@@ -403,10 +396,6 @@ public sealed class Socket : IDisposable
             text = null;
             return false;
         }
-        finally
-        {
-            MessagePool.Return(msg);
-        }
     }
 
     /// <summary>
@@ -417,16 +406,9 @@ public sealed class Socket : IDisposable
     /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
     public byte[] RecvBytes(RecvFlags flags = RecvFlags.None)
     {
-        var msg = MessagePool.Rent();
-        try
-        {
-            Recv(msg, flags);
-            return msg.ToArray();
-        }
-        finally
-        {
-            MessagePool.Return(msg);
-        }
+        using var msg = new Message();
+        Recv(msg, flags);
+        return msg.ToArray();
     }
 
     /// <summary>
@@ -440,7 +422,7 @@ public sealed class Socket : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         flags |= RecvFlags.DontWait;
-        var msg = MessagePool.Rent();
+        using var msg = new Message();
         try
         {
             msg.Recv(Handle, flags);
@@ -451,10 +433,6 @@ public sealed class Socket : IDisposable
         {
             data = null;
             return false;
-        }
-        finally
-        {
-            MessagePool.Return(msg);
         }
     }
 

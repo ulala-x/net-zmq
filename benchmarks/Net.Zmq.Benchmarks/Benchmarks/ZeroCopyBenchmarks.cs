@@ -128,46 +128,6 @@ public class ZeroCopyBenchmarks
     }
 
     [Benchmark]
-    public void Send_MessagePool()
-    {
-        var thread = new Thread(() =>
-        {
-            using var poller = new Poller(1);
-            int idx = poller.Add(_router2, PollEvents.In);
-            int n = 0;
-            while (n < MessageCount)
-            {
-                poller.Poll(-1);
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
-                {
-                    _router2.TryRecv(_recvBuffer, out _);
-                    n++;
-                }
-            }
-        });
-        thread.Start();
-
-        for (int i = 0; i < MessageCount; i++)
-        {
-            _router1.Send(_router2Id, SendFlags.SendMore);
-
-            var msg = MessagePool.Rent();
-            try
-            {
-                msg.Rebuild(MessageSize);
-                _sendData.CopyTo(msg.Data);
-                _router1.Send(msg, SendFlags.DontWait);
-            }
-            finally
-            {
-                MessagePool.Return(msg);
-            }
-        }
-
-        thread.Join();
-    }
-
-    [Benchmark]
     public void Send_ZeroCopy_NativeMemory()
     {
         var thread = new Thread(() =>
