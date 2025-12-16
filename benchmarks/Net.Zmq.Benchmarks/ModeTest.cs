@@ -102,10 +102,12 @@ public static class ModeTest
 
         var pollerRecvThread = new Thread(() =>
         {
+            using var poller = new Poller(1);
+            int idx = poller.Add(pull, PollEvents.In);
             int received = 0;
             while (received < messageCount)
             {
-                Poller.Poll(pull, PollEvents.In, -1);  // Block until event
+                poller.Poll(-1);  // Block until event
                 pollCount++;
 
                 // Burst receive all available messages

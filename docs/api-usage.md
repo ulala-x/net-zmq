@@ -401,7 +401,16 @@ if (property != null)
 
 ## Poller
 
-The `Poller` class enables multiplexing I/O events across multiple sockets.
+The `Poller` class enables multiplexing I/O events across multiple sockets using an instance-based API.
+
+### Creating a Poller
+
+```csharp
+using Net.Zmq;
+
+// Create a Poller with specified capacity (maximum number of sockets)
+using var poller = new Poller(capacity: 2);
+```
 
 ### Basic Polling
 
@@ -415,28 +424,26 @@ using var socket2 = new Socket(context, SocketType.Pull);
 socket1.Bind("tcp://*:5555");
 socket2.Bind("tcp://*:5556");
 
-// Create poll items
-var items = new PollItem[]
-{
-    new PollItem(socket1, PollEvents.In),
-    new PollItem(socket2, PollEvents.In)
-};
+// Create Poller and add sockets
+using var poller = new Poller(capacity: 2);
+int idx1 = poller.Add(socket1, PollEvents.In);
+int idx2 = poller.Add(socket2, PollEvents.In);
 
 // Poll with 1 second timeout
 while (true)
 {
-    int events = Poller.Poll(items, timeout: 1000);
+    int ready = poller.Poll(timeout: 1000);
 
-    if (events > 0)
+    if (ready > 0)
     {
-        // Check which sockets are ready
-        if (items[0].IsReadable)
+        // Check which sockets are ready using their indices
+        if (poller.IsReadable(idx1))
         {
             var msg = socket1.RecvString();
             Console.WriteLine($"Socket 1: {msg}");
         }
 
-        if (items[1].IsReadable)
+        if (poller.IsReadable(idx2))
         {
             var msg = socket2.RecvString();
             Console.WriteLine($"Socket 2: {msg}");
@@ -452,35 +459,73 @@ while (true)
 ### Poll Events
 
 ```csharp
-// Create poll items with different event types
-var items = new PollItem[]
-{
-    new PollItem(socket1, PollEvents.In),           // Read events
-    new PollItem(socket2, PollEvents.Out),          // Write events
-    new PollItem(socket3, PollEvents.In | PollEvents.Out), // Both
-    new PollItem(socket4, PollEvents.Err)           // Error events
-};
+using var poller = new Poller(capacity: 4);
 
-int count = Poller.Poll(items, timeout: 1000);
+// Add sockets with different event types
+int idx1 = poller.Add(socket1, PollEvents.In);                    // Read events
+int idx2 = poller.Add(socket2, PollEvents.Out);                   // Write events
+int idx3 = poller.Add(socket3, PollEvents.In | PollEvents.Out);   // Both
+int idx4 = poller.Add(socket4, PollEvents.Err);                   // Error events
 
-// Check event types
-if (items[0].IsReadable) { /* Handle read */ }
-if (items[1].IsWritable) { /* Handle write */ }
-if (items[2].IsReadable || items[2].IsWritable) { /* Handle both */ }
-if (items[3].HasError) { /* Handle error */ }
+int ready = poller.Poll(timeout: 1000);
+
+// Check event types using socket indices
+if (poller.IsReadable(idx1)) { /* Handle read */ }
+if (poller.IsWritable(idx2)) { /* Handle write */ }
+if (poller.IsReadable(idx3) || poller.IsWritable(idx3)) { /* Handle both */ }
+if (poller.HasError(idx4)) { /* Handle error */ }
+```
+
+### Updating Events
+
+```csharp
+using var poller = new Poller(capacity: 2);
+
+// Add socket with initial events
+int idx = poller.Add(socket, PollEvents.In);
+
+// Update events for existing socket
+poller.Update(idx, PollEvents.In | PollEvents.Out);
+
+// Later, change to write-only
+poller.Update(idx, PollEvents.Out);
 ```
 
 ### Poll Timeout
 
 ```csharp
+using var poller = new Poller(capacity: 2);
+poller.Add(socket1, PollEvents.In);
+poller.Add(socket2, PollEvents.In);
+
 // Block indefinitely until event occurs
-Poller.Poll(items, timeout: -1);
+poller.Poll(timeout: -1);
 
 // Return immediately (non-blocking)
-Poller.Poll(items, timeout: 0);
+poller.Poll(timeout: 0);
 
 // Wait up to 5 seconds
-Poller.Poll(items, timeout: 5000);
+poller.Poll(timeout: 5000);
+```
+
+### Clearing and Reusing Poller
+
+```csharp
+using var poller = new Poller(capacity: 2);
+
+// Add sockets
+int idx1 = poller.Add(socket1, PollEvents.In);
+int idx2 = poller.Add(socket2, PollEvents.In);
+
+// Use poller...
+poller.Poll(timeout: 1000);
+
+// Clear all registered sockets
+poller.Clear();
+
+// Add new sockets (reusing the same Poller instance)
+int idx3 = poller.Add(socket3, PollEvents.In);
+int idx4 = poller.Add(socket4, PollEvents.In);
 ```
 
 ### Advanced Polling Example
@@ -499,21 +544,21 @@ receiver.Bind("tcp://*:5555");
 sender.Connect("tcp://localhost:5556");
 control.Bind("inproc://control");
 
-// Setup poll items
-var items = new PollItem[]
-{
-    new PollItem(receiver, PollEvents.In),
-    new PollItem(control, PollEvents.In)
-};
+// Create Poller and add sockets
+using var poller = new Poller(capacity: 2);
+int receiverIdx = poller.Add(receiver, PollEvents.In);
+int controlIdx = poller.Add(control, PollEvents.In);
 
 bool running = true;
 while (running)
 {
     // Poll with 100ms timeout
-    if (Poller.Poll(items, timeout: 100) > 0)
+    int ready = poller.Poll(timeout: 100);
+
+    if (ready > 0)
     {
         // Handle incoming messages
-        if (items[0].IsReadable)
+        if (poller.IsReadable(receiverIdx))
         {
             var msg = receiver.RecvString();
             Console.WriteLine($"Received: {msg}");
@@ -523,7 +568,7 @@ while (running)
         }
 
         // Handle control messages
-        if (items[1].IsReadable)
+        if (poller.IsReadable(controlIdx))
         {
             var cmd = control.RecvString();
             if (cmd == "STOP")
@@ -534,6 +579,29 @@ while (running)
     }
 }
 ```
+
+### Poller API Reference
+
+| Method | Description |
+|--------|-------------|
+| `Poller(int capacity)` | Creates a Poller with specified maximum socket capacity |
+| `Add(Socket, PollEvents)` | Adds a socket to the poller and returns its index |
+| `Update(int index, PollEvents)` | Updates poll events for the socket at the given index |
+| `Poll(long timeout)` | Waits for events on registered sockets (timeout in milliseconds, -1 = infinite) |
+| `IsReadable(int index)` | Checks if the socket at the given index is readable |
+| `IsWritable(int index)` | Checks if the socket at the given index is writable |
+| `HasError(int index)` | Checks if the socket at the given index has an error |
+| `Clear()` | Removes all registered sockets from the poller |
+| `Dispose()` | Releases resources used by the poller |
+
+### PollEvents Flags
+
+| Flag | Description |
+|------|-------------|
+| `None` | No events |
+| `In` | Socket is readable (incoming messages available) |
+| `Out` | Socket is writable (can send messages without blocking) |
+| `Err` | Socket has an error condition |
 
 ## Error Handling
 
@@ -598,10 +666,14 @@ catch (Exception ex)
 
 ### Poller
 
-- Use polling for multiple socket I/O
-- Set reasonable timeout values
-- Handle all possible events
-- Consider using separate threads for blocking I/O
+- Create Poller instances with appropriate capacity
+- Store socket indices returned by Add() for event checking
+- Use polling for multiple socket I/O multiplexing
+- Set reasonable timeout values (-1 for infinite, 0 for non-blocking, positive for timeout)
+- Handle all possible events (IsReadable, IsWritable, HasError)
+- Use Update() to change events without removing and re-adding sockets
+- Call Clear() to reset and reuse the same Poller instance
+- Always dispose Poller instances when done
 
 ## Next Steps
 

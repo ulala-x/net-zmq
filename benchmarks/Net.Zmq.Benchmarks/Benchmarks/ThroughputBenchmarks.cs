@@ -107,10 +107,12 @@ public class ThroughputBenchmarks
             }),
             ReceiveMode.Poller => new Thread(() =>
             {
+                using var poller = new Poller(1);
+                int idx = poller.Add(recvSocket, PollEvents.In);
                 int n = 0;
                 while (n < MessageCount)
                 {
-                    Poller.Poll(recvSocket, PollEvents.In, -1);
+                    poller.Poll(-1);
                     while (n < MessageCount && tryRecv()) n++;
                 }
             }),

@@ -48,14 +48,3 @@ internal struct ZmqPollItemUnix
     public short Events;
     public short Revents;
 }
-
-/// <summary>
-/// Unified poll item for managed code.
-/// </summary>
-internal struct ZmqPollItem
-{
-    public nint Socket;
-    public nint Fd;  // Use nint for managed code, convert at P/Invoke boundary
-    public short Events;
-    public short Revents;
-}

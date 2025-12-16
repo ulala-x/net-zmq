@@ -34,12 +34,10 @@ sender2.Start();
 // Allow senders to connect
 Thread.Sleep(500);
 
-// Create poll items
-var pollItems = new PollItem[]
-{
-    new(receiver1, PollEvents.In),
-    new(receiver2, PollEvents.In)
-};
+// Create poller with instance-based API
+using var poller = new Poller(2);
+int idx1 = poller.Add(receiver1, PollEvents.In);
+int idx2 = poller.Add(receiver2, PollEvents.In);
 
 Console.WriteLine("[Main] Starting to poll both receivers...");
 Console.WriteLine();
@@ -50,7 +48,7 @@ int maxMessages = 20;
 while (totalMessages < maxMessages)
 {
     // Poll with 1 second timeout
-    int ready = Poller.Poll(pollItems, 1000);
+    int ready = poller.Poll(1000);
 
     if (ready == 0)
     {
@@ -59,7 +57,7 @@ while (totalMessages < maxMessages)
     }
 
     // Check receiver 1
-    if (pollItems[0].IsReadable)
+    if (poller.IsReadable(idx1))
     {
         var msg = receiver1.RecvString();
         Console.WriteLine($"[Receiver-1] {msg}");
@@ -67,7 +65,7 @@ while (totalMessages < maxMessages)
     }
 
     // Check receiver 2
-    if (pollItems[1].IsReadable)
+    if (poller.IsReadable(idx2))
     {
         var msg = receiver2.RecvString();
         Console.WriteLine($"[Receiver-2] {msg}");

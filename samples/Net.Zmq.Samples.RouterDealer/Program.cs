@@ -60,20 +60,20 @@ void RunBroker()
     var clientRequests = new Queue<(byte[] identity, byte[] request)>();
     var availableWorkers = new Queue<byte[]>();
 
-    // Polling loop
-    var pollItems = new PollItem[2];
-    pollItems[0] = new PollItem(frontend, PollEvents.In);
-    pollItems[1] = new PollItem(backend, PollEvents.In);
+    // Create poller with instance-based API
+    using var poller = new Poller(2);
+    int frontendIdx = poller.Add(frontend, PollEvents.In);
+    int backendIdx = poller.Add(backend, PollEvents.In);
 
     while (true)
     {
         try
         {
             // Poll with 100ms timeout
-            Poller.Poll(pollItems, 100);
+            poller.Poll(100);
 
             // Check frontend (client requests)
-            if (pollItems[0].IsReadable)
+            if (poller.IsReadable(frontendIdx))
             {
                 // Receive from client: [client-identity][empty][request]
                 var clientIdentity = RecvBytes(frontend);
@@ -107,7 +107,7 @@ void RunBroker()
             }
 
             // Check backend (worker responses)
-            if (pollItems[1].IsReadable)
+            if (poller.IsReadable(backendIdx))
             {
                 // Receive from worker: [worker-identity][empty][client-identity][empty][reply]
                 var workerIdentity = RecvBytes(backend);

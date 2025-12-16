@@ -85,13 +85,15 @@ public static class AllocTest
         // === Poller mode ===
         var beforePoller = GC.GetTotalAllocatedBytes(precise: true);
         int pollCount = 0;
-        
+
         var pollerThread = new Thread(() =>
         {
+            using var poller = new Poller(1);
+            int idx = poller.Add(pull, PollEvents.In);
             int received = 0;
             while (received < messageCount)
             {
-                Poller.Poll(pull, PollEvents.In, -1);
+                poller.Poll(-1);
                 pollCount++;
                 while (received < messageCount && pull.TryRecv(recvBuffer, out _))
                     received++;

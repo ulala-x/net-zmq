@@ -134,21 +134,21 @@ using var backend = new Socket(ctx, SocketType.Router);
 frontend.Bind("tcp://*:5555");  // For clients
 backend.Bind("tcp://*:5556");   // For workers
 
-// Poll both sockets
-var pollItems = new PollItem[2];
-pollItems[0] = new PollItem(frontend, PollEvents.In);
-pollItems[1] = new PollItem(backend, PollEvents.In);
+// Create Poller and add both sockets
+using var poller = new Poller(capacity: 2);
+int frontendIdx = poller.Add(frontend, PollEvents.In);
+int backendIdx = poller.Add(backend, PollEvents.In);
 
 while (true)
 {
-    Poller.Poll(pollItems, 100);
+    poller.Poll(timeout: 100);
 
-    if (pollItems[0].IsReadable)
+    if (poller.IsReadable(frontendIdx))
     {
         // Handle client request
     }
 
-    if (pollItems[1].IsReadable)
+    if (poller.IsReadable(backendIdx))
     {
         // Handle worker response or READY message
     }

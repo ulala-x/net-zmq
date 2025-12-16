@@ -338,86 +338,26 @@ internal static partial class LibZmq
     // ========== Polling ==========
 
     /// <summary>
-    /// Polls multiple sockets for events (Windows version).
+    /// Polls multiple sockets for events (Windows version - pointer based).
     /// </summary>
     [LibraryImport(LibraryName, EntryPoint = "zmq_poll")]
-    internal static partial int PollWindows([In, Out] ZmqPollItemWindows[] items, int nitems, long timeout);
+    internal static unsafe partial int PollWindows(ZmqPollItemWindows* items, int nitems, long timeout);
 
     /// <summary>
-    /// Polls multiple sockets for events (Unix version).
+    /// Polls multiple sockets for events (Unix version - pointer based).
     /// </summary>
     [LibraryImport(LibraryName, EntryPoint = "zmq_poll")]
-    internal static partial int PollUnix([In, Out] ZmqPollItemUnix[] items, int nitems, long timeout);
-
-    // Thread-local cached arrays for polling (zero allocation after array reaches required size)
-    [ThreadStatic]
-    private static ZmqPollItemWindows[]? _cachedPollItemWindows;
-    [ThreadStatic]
-    private static ZmqPollItemUnix[]? _cachedPollItemUnix;
+    internal static unsafe partial int PollUnix(ZmqPollItemUnix* items, int nitems, long timeout);
 
     /// <summary>
-    /// Polls multiple sockets for events (platform-aware wrapper).
+    /// Polls multiple sockets for events (platform-aware wrapper for pointer-based calls).
     /// </summary>
-    internal static int Poll(ZmqPollItem[] items, int nitems, long timeout)
+    internal static unsafe int Poll(void* items, int nitems, long timeout)
     {
         if (OperatingSystem.IsWindows())
-        {
-            // Grow cached array if needed (zero allocation after reaching max size used)
-            if (_cachedPollItemWindows == null || _cachedPollItemWindows.Length < nitems)
-            {
-                _cachedPollItemWindows = new ZmqPollItemWindows[nitems];
-            }
-            var winItems = _cachedPollItemWindows;
-
-            for (int i = 0; i < nitems; i++)
-            {
-                winItems[i] = new ZmqPollItemWindows
-                {
-                    Socket = items[i].Socket,
-                    Fd = (nuint)items[i].Fd,
-                    Events = items[i].Events,
-                    Revents = items[i].Revents
-                };
-            }
-
-            var result = PollWindows(winItems, nitems, timeout);
-
-            for (int i = 0; i < nitems; i++)
-            {
-                items[i].Revents = winItems[i].Revents;
-            }
-
-            return result;
-        }
+            return PollWindows((ZmqPollItemWindows*)items, nitems, timeout);
         else
-        {
-            // Grow cached array if needed (zero allocation after reaching max size used)
-            if (_cachedPollItemUnix == null || _cachedPollItemUnix.Length < nitems)
-            {
-                _cachedPollItemUnix = new ZmqPollItemUnix[nitems];
-            }
-            var unixItems = _cachedPollItemUnix;
-
-            for (int i = 0; i < nitems; i++)
-            {
-                unixItems[i] = new ZmqPollItemUnix
-                {
-                    Socket = items[i].Socket,
-                    Fd = (int)items[i].Fd,
-                    Events = items[i].Events,
-                    Revents = items[i].Revents
-                };
-            }
-
-            var result = PollUnix(unixItems, nitems, timeout);
-
-            for (int i = 0; i < nitems; i++)
-            {
-                items[i].Revents = unixItems[i].Revents;
-            }
-
-            return result;
-        }
+            return PollUnix((ZmqPollItemUnix*)items, nitems, timeout);
     }
 
     // ========== Utilities ==========

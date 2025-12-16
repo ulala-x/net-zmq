@@ -97,16 +97,18 @@ peerA.Send("Hello back from Peer A!");
 ```csharp
 using Net.Zmq;
 
-var items = new PollItem[]
-{
-    new(socket1, PollEvents.In),
-    new(socket2, PollEvents.In)
-};
+// Create Poller instance
+using var poller = new Poller(capacity: 2);
 
-if (Poller.Poll(items, timeout: 1000) > 0)
+// Add sockets and store their indices
+int idx1 = poller.Add(socket1, PollEvents.In);
+int idx2 = poller.Add(socket2, PollEvents.In);
+
+// Poll for events
+if (poller.Poll(timeout: 1000) > 0)
 {
-    if (items[0].IsReadable) { /* handle socket1 */ }
-    if (items[1].IsReadable) { /* handle socket2 */ }
+    if (poller.IsReadable(idx1)) { /* handle socket1 */ }
+    if (poller.IsReadable(idx2)) { /* handle socket2 */ }
 }
 ```
 

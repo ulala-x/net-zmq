@@ -19,6 +19,31 @@ public static class SocketAsyncExtensions
     /// </summary>
     private const int DefaultPollIntervalMs = 10;
 
+    /// <summary>
+    /// Thread-local cached Poller for single-socket async operations.
+    /// Reused to avoid repeated allocations in async methods.
+    /// </summary>
+    [ThreadStatic]
+    private static Poller? _cachedPoller;
+
+    /// <summary>
+    /// Gets or creates a thread-local cached Poller instance.
+    /// The poller is cleared before each use to ensure it's in a clean state.
+    /// </summary>
+    /// <returns>A cleared, ready-to-use Poller instance.</returns>
+    private static Poller GetOrCreatePoller()
+    {
+        if (_cachedPoller == null)
+        {
+            _cachedPoller = new Poller(1);
+        }
+        else
+        {
+            _cachedPoller.Clear();
+        }
+        return _cachedPoller;
+    }
+
     #region Send Async
 
     /// <summary>
@@ -70,16 +95,15 @@ public static class SocketAsyncExtensions
         // Slow path: Poll until ready
         return await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.Out);
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                pollItems[0] = new PollItem(socket, PollEvents.Out);
-
                 // Poll with short timeout to check if socket is ready to send
-                if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsWritable)
+                if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsWritable(0))
                 {
                     return socket.Send(data.Span);
                 }
@@ -119,16 +143,15 @@ public static class SocketAsyncExtensions
         // Slow path: Poll until ready
         return await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.Out);
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                pollItems[0] = new PollItem(socket, PollEvents.Out);
-
                 // Poll with short timeout to check if socket is ready to send
-                if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsWritable)
+                if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsWritable(0))
                 {
                     return socket.Send(text);
                 }
@@ -169,16 +192,15 @@ public static class SocketAsyncExtensions
         // Slow path: Poll until ready
         return await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.In);
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                pollItems[0] = new PollItem(socket, PollEvents.In);
-
                 // Poll with short timeout to check if socket has data available
-                if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsReadable)
+                if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
                     return socket.RecvBytes();
                 }
@@ -216,16 +238,15 @@ public static class SocketAsyncExtensions
         // Slow path: Poll until ready
         return await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.In);
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                pollItems[0] = new PollItem(socket, PollEvents.In);
-
                 // Poll with short timeout to check if socket has data available
-                if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsReadable)
+                if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
                     return socket.RecvString();
                 }
@@ -266,7 +287,8 @@ public static class SocketAsyncExtensions
 
         await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.Out);
             var count = message.Count;
 
             for (int i = 0; i < count; i++)
@@ -306,10 +328,8 @@ public static class SocketAsyncExtensions
                     {
                         cancellationToken.ThrowIfCancellationRequested();
 
-                        pollItems[0] = new PollItem(socket, PollEvents.Out);
-
                         // Poll with short timeout
-                        if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsWritable)
+                        if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsWritable(0))
                         {
                             socket.Send(frame, flags);
                             break;
@@ -351,17 +371,16 @@ public static class SocketAsyncExtensions
         // Slow path: Poll until first frame is ready
         return await Task.Run(() =>
         {
-            var pollItems = new PollItem[1];
+            var poller = GetOrCreatePoller();
+            poller.Add(socket, PollEvents.In);
 
             // Wait for the first frame
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                pollItems[0] = new PollItem(socket, PollEvents.In);
-
                 // Poll with short timeout
-                if (Poller.Poll(pollItems, DefaultPollIntervalMs) > 0 && pollItems[0].IsReadable)
+                if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
                     // First frame is available, receive the complete multipart message
                     // (remaining frames should be immediately available)
