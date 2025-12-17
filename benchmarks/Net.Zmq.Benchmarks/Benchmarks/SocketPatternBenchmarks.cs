@@ -6,7 +6,7 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 public enum ReceiveMode { Blocking, NonBlocking, Poller }
 
 [MemoryDiagnoser]
-public class ThroughputBenchmarks
+public class SocketPatternBenchmarks
 {
     [Params(64, 1024, 65536)]
     public int MessageSize { get; set; }
