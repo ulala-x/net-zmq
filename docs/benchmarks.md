@@ -110,36 +110,36 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 
 #### 64-Byte Messages
 
-| Mode | Mean | Latency | Throughput | Allocated | Ratio |
-|------|------|---------|------------|-----------|-------|
-| **Blocking** | 2.325 ms | 232.52 ns | 4.30M/sec | 203 B | 1.00x |
-| **Poller** | 2.376 ms | 237.59 ns | 4.21M/sec | 323 B | 1.02x |
-| NonBlocking (Yield) | 2.643 ms | 264.29 ns | 3.78M/sec | 203 B | 1.14x |
-| NonBlocking (Sleep 1ms) | 3.318 ms | 331.84 ns | 3.01M/sec | 203 B | 1.43x |
-| NonBlocking (Sleep 5ms) | 6.363 ms | 636.28 ns | 1.57M/sec | 206 B | 2.74x |
-| NonBlocking (Sleep 10ms) | 11.386 ms | 1.14 μs | 878.28K/sec | 212 B | 4.90x |
+| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
+|------|------|---------|--------------|-----------|-------|
+| **Blocking** | 2.325 ms | 232.52 ns | 4.30M | 203 B | 1.00x |
+| **Poller** | 2.376 ms | 237.59 ns | 4.21M | 323 B | 1.02x |
+| NonBlocking (Yield) | 2.643 ms | 264.29 ns | 3.78M | 203 B | 1.14x |
+| NonBlocking (Sleep 1ms) | 3.318 ms | 331.84 ns | 3.01M | 203 B | 1.43x |
+| NonBlocking (Sleep 5ms) | 6.363 ms | 636.28 ns | 1.57M | 206 B | 2.74x |
+| NonBlocking (Sleep 10ms) | 11.386 ms | 1.14 μs | 878.28K | 212 B | 4.90x |
 
 #### 1500-Byte Messages
 
-| Mode | Mean | Latency | Throughput | Allocated | Ratio |
-|------|------|---------|------------|-----------|-------|
-| NonBlocking (Yield) | 10.461 ms | 1.05 μs | 955.92K/sec | 212 B | 0.95x |
-| **Poller** | 10.552 ms | 1.06 μs | 947.66K/sec | 332 B | 0.96x |
-| **Blocking** | 11.040 ms | 1.10 μs | 905.79K/sec | 212 B | 1.00x |
-| NonBlocking (Sleep 1ms) | 13.346 ms | 1.33 μs | 749.26K/sec | 212 B | 1.21x |
-| NonBlocking (Sleep 5ms) | 14.931 ms | 1.49 μs | 669.73K/sec | 212 B | 1.35x |
-| NonBlocking (Sleep 10ms) | 15.141 ms | 1.51 μs | 660.45K/sec | 212 B | 1.37x |
+| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
+|------|------|---------|--------------|-----------|-------|
+| NonBlocking (Yield) | 10.461 ms | 1.05 μs | 955.92K | 212 B | 0.95x |
+| **Poller** | 10.552 ms | 1.06 μs | 947.66K | 332 B | 0.96x |
+| **Blocking** | 11.040 ms | 1.10 μs | 905.79K | 212 B | 1.00x |
+| NonBlocking (Sleep 1ms) | 13.346 ms | 1.33 μs | 749.26K | 212 B | 1.21x |
+| NonBlocking (Sleep 5ms) | 14.931 ms | 1.49 μs | 669.73K | 212 B | 1.35x |
+| NonBlocking (Sleep 10ms) | 15.141 ms | 1.51 μs | 660.45K | 212 B | 1.37x |
 
 #### 65KB Messages
 
-| Mode | Mean | Latency | Throughput | Allocated | Ratio |
-|------|------|---------|------------|-----------|-------|
-| NonBlocking (Yield) | 140.122 ms | 14.01 μs | 71.37K/sec | 384 B | 0.83x |
-| **Poller** | 167.479 ms | 16.75 μs | 59.71K/sec | 504 B | 0.99x |
-| **Blocking** | 168.915 ms | 16.89 μs | 59.20K/sec | 384 B | 1.00x |
-| NonBlocking (Sleep 10ms) | 202.023 ms | 20.20 μs | 49.50K/sec | 445 B | 1.20x |
-| NonBlocking (Sleep 5ms) | 264.741 ms | 26.47 μs | 37.77K/sec | 568 B | 1.57x |
-| NonBlocking (Sleep 1ms) | 279.412 ms | 27.94 μs | 35.79K/sec | 568 B | 1.65x |
+| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
+|------|------|---------|--------------|-----------|-------|
+| NonBlocking (Yield) | 140.122 ms | 14.01 μs | 71.37K | 384 B | 0.83x |
+| **Poller** | 167.479 ms | 16.75 μs | 59.71K | 504 B | 0.99x |
+| **Blocking** | 168.915 ms | 16.89 μs | 59.20K | 384 B | 1.00x |
+| NonBlocking (Sleep 10ms) | 202.023 ms | 20.20 μs | 49.50K | 445 B | 1.20x |
+| NonBlocking (Sleep 5ms) | 264.741 ms | 26.47 μs | 37.77K | 568 B | 1.57x |
+| NonBlocking (Sleep 1ms) | 279.412 ms | 27.94 μs | 35.79K | 568 B | 1.65x |
 
 ### Performance Analysis
 
@@ -198,30 +198,30 @@ All tests use Poller mode for reception.
 
 #### 64-Byte Messages
 
-| Strategy | Mean | Latency | Throughput | Gen0 | Allocated | Ratio |
-|----------|------|---------|------------|------|-----------|-------|
-| **ArrayPool** | 2.595 ms | 259.53 ns | 3.85M/sec | - | 1.07 KB | 0.98x |
-| **ByteArray** | 2.638 ms | 263.76 ns | 3.79M/sec | 3.91 | 1719.07 KB | 1.00x |
-| **Message** | 5.364 ms | 536.41 ns | 1.86M/sec | - | 625.32 KB | 2.03x |
-| **MessageZeroCopy** | 6.428 ms | 642.82 ns | 1.56M/sec | - | 625.32 KB | 2.44x |
+| Strategy | Mean | Latency | Messages/sec | Gen0 | Allocated | Ratio |
+|----------|------|---------|--------------|------|-----------|-------|
+| **ArrayPool** | 2.595 ms | 259.53 ns | 3.85M | - | 1.07 KB | 0.98x |
+| **ByteArray** | 2.638 ms | 263.76 ns | 3.79M | 3.91 | 1719.07 KB | 1.00x |
+| **Message** | 5.364 ms | 536.41 ns | 1.86M | - | 625.32 KB | 2.03x |
+| **MessageZeroCopy** | 6.428 ms | 642.82 ns | 1.56M | - | 625.32 KB | 2.44x |
 
 #### 1500-Byte Messages
 
-| Strategy | Mean | Latency | Throughput | Gen0 | Allocated | Ratio |
-|----------|------|---------|------------|------|-----------|-------|
-| **Message** | 11.287 ms | 1.13 μs | 886.00K/sec | - | 625.32 KB | 0.98x |
-| **ByteArray** | 11.495 ms | 1.15 μs | 869.97K/sec | 78.13 | 29844.07 KB | 1.00x |
-| **ArrayPool** | 11.929 ms | 1.19 μs | 838.30K/sec | - | 3.01 KB | 1.04x |
-| **MessageZeroCopy** | 14.504 ms | 1.45 μs | 689.46K/sec | - | 625.32 KB | 1.26x |
+| Strategy | Mean | Latency | Messages/sec | Gen0 | Allocated | Ratio |
+|----------|------|---------|--------------|------|-----------|-------|
+| **Message** | 11.287 ms | 1.13 μs | 886.00K | - | 625.32 KB | 0.98x |
+| **ByteArray** | 11.495 ms | 1.15 μs | 869.97K | 78.13 | 29844.07 KB | 1.00x |
+| **ArrayPool** | 11.929 ms | 1.19 μs | 838.30K | - | 3.01 KB | 1.04x |
+| **MessageZeroCopy** | 14.504 ms | 1.45 μs | 689.46K | - | 625.32 KB | 1.26x |
 
 #### 65KB Messages
 
-| Strategy | Mean | Latency | Throughput | Gen0 | Gen1 | Allocated | Ratio |
-|----------|------|---------|------------|------|------|-----------|-------|
-| **MessageZeroCopy** | 134.626 ms | 13.46 μs | 74.28K/sec | - | - | 625.49 KB | 0.90x |
-| **Message** | 142.068 ms | 14.21 μs | 70.39K/sec | - | - | 625.49 KB | 0.95x |
-| **ArrayPool** | 148.562 ms | 14.86 μs | 67.31K/sec | - | - | 65.21 KB | 0.99x |
-| **ByteArray** | 150.055 ms | 15.01 μs | 66.64K/sec | 3250 | 250 | 1280469.24 KB | 1.00x |
+| Strategy | Mean | Latency | Messages/sec | Gen0 | Gen1 | Allocated | Ratio |
+|----------|------|---------|--------------|------|------|-----------|-------|
+| **MessageZeroCopy** | 134.626 ms | 13.46 μs | 74.28K | - | - | 625.49 KB | 0.90x |
+| **Message** | 142.068 ms | 14.21 μs | 70.39K | - | - | 625.49 KB | 0.95x |
+| **ArrayPool** | 148.562 ms | 14.86 μs | 67.31K | - | - | 65.21 KB | 0.99x |
+| **ByteArray** | 150.055 ms | 15.01 μs | 66.64K | 3250 | 250 | 1280469.24 KB | 1.00x |
 
 ### Performance and GC Analysis
 
