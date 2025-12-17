@@ -28,7 +28,7 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 - **Warmup Count**: 3
 - **Launch Count**: 1
 - **Message Count**: 10,000 messages per test
-- **Transport**: inproc:// (in-process)
+- **Transport**: tcp://127.0.0.1 (localhost loopback)
 - **Pattern**: ROUTER-to-ROUTER (for receive mode tests)
 
 ## Receive Mode Benchmarks
@@ -290,14 +290,14 @@ dotnet run -c Release --filter "*MessageSize=64*"
 
 ### Measurement Environment
 
-- All benchmarks use `inproc://` transport to eliminate network variability
+- All benchmarks use `tcp://127.0.0.1` transport (localhost loopback)
 - Concurrent mode simulates realistic producer/consumer scenarios
 - Results represent steady-state performance after warmup
 - BenchmarkDotNet's ShortRun job provides statistically valid measurements with reduced runtime
 
 ### Limitations and Considerations
 
-- `inproc://` transport performance differs from `tcp://` or `ipc://` transports
+- `tcp://127.0.0.1` loopback transport was used; actual network performance will vary based on network infrastructure
 - Actual production performance depends on network characteristics, message patterns, and system load
 - GC measurements reflect benchmark workload; application GC behavior depends on overall heap activity
 - Latency measurements include both send and receive operations for 10K messages
