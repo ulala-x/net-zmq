@@ -186,26 +186,28 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## Performance
 
-Net.Zmq delivers exceptional performance with **4.95M messages/sec throughput** and **202ns latency** at peak performance.
+Net.Zmq provides multiple receive modes (Blocking, NonBlocking, Poller) and memory strategies (ByteArray, ArrayPool, Message, MessageZeroCopy) to accommodate different performance requirements.
 
-### Highlights
+### Representative Performance
 
-- **Peak Throughput**: 4.95M msg/sec (PUSH/PULL, 64B, Blocking mode)
-- **Ultra-Low Latency**: 202ns per message
-- **Memory Efficient**: 441B allocation per 10K messages
-- **Consistent**: All patterns achieve 4M+ msg/sec for small messages
+Performance characteristics vary based on message size, receive mode, and memory strategy:
 
-### Performance by Message Size
+| Message Size | Throughput Range | Latency Range | Notes |
+|--------------|------------------|---------------|-------|
+| **64 bytes** | 1.56M - 4.30M/sec | 233 - 643 ns | Blocking and Poller modes show similar performance; managed strategies preferred |
+| **1.5 KB** | 670K - 948K/sec | 1.06 - 1.49 μs | Performance converges across strategies; GC pressure begins with ByteArray |
+| **65 KB** | 28K - 74K/sec | 13.5 - 35.1 μs | Native strategies avoid GC pressure; NonBlocking shows degraded performance |
 
-| Message Size | Best Throughput | Latency | Pattern | Mode |
-|--------------|-----------------|---------|---------|------|
-| **64 bytes** | 4.95M/sec | 202ns | PUSH/PULL | Blocking |
-| **1 KB** | 1.36M/sec | 736ns | PUB/SUB | Blocking |
-| **64 KB** | 73.47K/sec | 13.61μs | ROUTER/ROUTER | Blocking |
+### Selection Guidance
 
-**Test Environment**: Intel Core Ultra 7 265K, .NET 8.0.22, Ubuntu 24.04.3 LTS
+- **Blocking and Poller modes** deliver comparable performance (within 2-3% for most workloads)
+- **NonBlocking mode** introduces additional latency due to polling overhead
+- **Memory strategies** show performance differences based on message size and GC sensitivity
+- **GC-free strategies** (ArrayPool, Message, MessageZeroCopy) recommended for large messages or high-throughput scenarios
 
-For comprehensive benchmark results including all patterns (PUSH/PULL, PUB/SUB, ROUTER/ROUTER) and modes (Blocking, Non-Blocking, Poller), see [BENCHMARKS.md](BENCHMARKS.md).
+**Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
+
+For detailed benchmark results, performance analysis, and selection guidance, see [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Supported Platforms
 

@@ -1,17 +1,16 @@
 # Net.Zmq Performance Benchmarks
 
-This document contains comprehensive performance benchmark results for Net.Zmq.
+This document contains comprehensive performance benchmark results for Net.Zmq, focusing on receive mode comparisons and memory strategy evaluations.
 
 ## Executive Summary
 
-Net.Zmq delivers exceptional performance across all messaging patterns:
+Net.Zmq provides multiple receive modes and memory strategies to accommodate different performance requirements and architectural patterns. This benchmark suite evaluates:
 
-- **Peak Throughput**: 4.95M messages/sec (PUSH/PULL, 64B, Blocking mode)
-- **Ultra-Low Latency**: 202ns per message at peak throughput
-- **Minimal Allocation**: 441B memory allocation per 10K messages
-- **Consistent Performance**: All patterns achieve 4M+ msg/sec in blocking mode
+- **Receive Modes**: Blocking, NonBlocking, and Poller-based message reception
+- **Memory Strategies**: ByteArray, ArrayPool, Message, and MessageZeroCopy approaches
+- **Message Sizes**: 64 bytes (small), 1500 bytes (MTU-sized), and 65KB (large)
 
-## Test Environment
+### Test Environment
 
 | Component | Specification |
 |-----------|--------------|
@@ -29,191 +28,209 @@ Net.Zmq delivers exceptional performance across all messaging patterns:
 - **Warmup Count**: 3
 - **Launch Count**: 1
 - **Message Count**: 10,000 messages per test
-- **Concurrent**: True
+- **Transport**: inproc:// (in-process)
+- **Pattern**: ROUTER-to-ROUTER (for receive mode tests)
 
-## Performance by Message Size
+## Receive Mode Benchmarks
 
-### Small Messages (64 bytes)
+### How Each Mode Works
 
-Optimal for control messages, signaling, and low-latency scenarios.
+**Blocking Mode (`socket.Recv()`)**: The calling thread blocks until a message arrives. This is the simplest approach and provides deterministic waiting with minimal CPU usage. The thread yields to the OS scheduler while waiting.
 
-#### Blocking Mode (Highest Performance)
+**NonBlocking Mode (`socket.TryRecv()`)**: Polling-based reception where the application repeatedly calls `TryRecv()` and sleeps for 10ms if no message is available. This approach prevents thread blocking but introduces latency due to the sleep interval.
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| **PUSH/PULL** | No | **202ns** | **4.95M/sec** | **441B** |
-| PUB/SUB | No | 201ns | 4.97M/sec | 443B |
-| ROUTER/ROUTER | No | 234ns | 4.27M/sec | 443B |
-| PUSH/PULL | Yes | 209ns | 4.77M/sec | 443B |
-| PUB/SUB | Yes | 200ns | 4.99M/sec | 443B |
-| ROUTER/ROUTER | Yes | 229ns | 4.37M/sec | 443B |
+**Poller Mode**: Event-driven reception using `zmq_poll()`. The application waits for socket events without busy-waiting. This mode supports monitoring multiple sockets simultaneously and provides efficient CPU usage while maintaining responsiveness.
 
-#### Non-Blocking Mode
+### Performance Results
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| PUSH/PULL | No | 1.10μs | 908K/sec | 452B |
-| PUB/SUB | No | 1.11μs | 903K/sec | 452B |
-| ROUTER/ROUTER | No | 1.14μs | 876K/sec | 452B |
-| PUSH/PULL | Yes | 1.10μs | 913K/sec | 452B |
-| PUB/SUB | Yes | 1.10μs | 906K/sec | 452B |
-| ROUTER/ROUTER | Yes | 1.14μs | 873K/sec | 452B |
+All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 
-#### Poller Mode
+#### 64-Byte Messages
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| PUSH/PULL | No | 206ns | 4.86M/sec | 603B |
-| PUB/SUB | No | 235ns | 4.26M/sec | 603B |
-| ROUTER/ROUTER | No | 252ns | 3.97M/sec | 603B |
-| PUSH/PULL | Yes | 204ns | 4.89M/sec | 603B |
-| PUB/SUB | Yes | 208ns | 4.80M/sec | 603B |
-| ROUTER/ROUTER | Yes | 239ns | 4.18M/sec | 603B |
+| Mode | Mean | Latency | Throughput | Allocated | Ratio |
+|------|------|---------|------------|-----------|-------|
+| **Blocking** | 2.325 ms | 232.52 ns | 4.30M/sec | 203 B | 1.00x |
+| **Poller** | 2.376 ms | 237.59 ns | 4.21M/sec | 323 B | 1.02x |
+| **NonBlocking** | 11.447 ms | 1.14 μs | 873.62K/sec | 212 B | 4.92x |
 
-### Medium Messages (1KB)
+#### 1500-Byte Messages
 
-Balanced performance for typical application payloads.
+| Mode | Mean | Latency | Throughput | Allocated | Ratio |
+|------|------|---------|------------|-----------|-------|
+| **Poller** | 10.552 ms | 1.06 μs | 947.66K/sec | 332 B | 0.96x |
+| **Blocking** | 11.040 ms | 1.10 μs | 905.79K/sec | 212 B | 1.00x |
+| **NonBlocking** | 14.909 ms | 1.49 μs | 670.72K/sec | 212 B | 1.35x |
 
-#### Blocking Mode (Highest Performance)
+#### 65KB Messages
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| **PUSH/PULL** | No | **803ns** | **1.25M/sec** | **446B** |
-| PUB/SUB | No | 736ns | 1.36M/sec | 446B |
-| ROUTER/ROUTER | No | 808ns | 1.24M/sec | 452B |
-| PUSH/PULL | Yes | 831ns | 1.20M/sec | 452B |
-| PUB/SUB | Yes | 782ns | 1.28M/sec | 452B |
-| ROUTER/ROUTER | Yes | 806ns | 1.24M/sec | 452B |
+| Mode | Mean | Latency | Throughput | Allocated | Ratio |
+|------|------|---------|------------|-----------|-------|
+| **Poller** | 167.479 ms | 16.75 μs | 59.71K/sec | 504 B | 0.99x |
+| **Blocking** | 168.915 ms | 16.89 μs | 59.20K/sec | 384 B | 1.00x |
+| **NonBlocking** | 351.448 ms | 35.14 μs | 28.45K/sec | 445 B | 2.08x |
 
-#### Non-Blocking Mode
+### Performance Analysis
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| PUSH/PULL | No | 1.24μs | 808K/sec | 452B |
-| PUB/SUB | No | 1.23μs | 811K/sec | 452B |
-| ROUTER/ROUTER | No | 1.29μs | 775K/sec | 452B |
-| PUSH/PULL | Yes | 1.22μs | 818K/sec | 452B |
-| PUB/SUB | Yes | 1.30μs | 769K/sec | 452B |
-| ROUTER/ROUTER | Yes | 1.41μs | 707K/sec | 452B |
+**Blocking vs Poller**: Performance is nearly identical across all message sizes (96-102% relative performance). Poller allocates slightly more memory (323-504 bytes vs 203-384 bytes for 10K messages) due to polling infrastructure, but the difference is negligible in practice.
 
-#### Poller Mode
+**NonBlocking Performance**: NonBlocking mode shows 1.35-4.92x slower performance compared to Blocking. This difference stems from the `Thread.Sleep(10ms)` call when no message is immediately available, which adds latency to each receive operation. The performance gap is most pronounced with small messages (64B) where the sleep overhead dominates total processing time.
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| PUSH/PULL | No | 750ns | 1.33M/sec | 606B |
-| PUB/SUB | No | 747ns | 1.34M/sec | 606B |
-| ROUTER/ROUTER | No | 780ns | 1.28M/sec | 606B |
-| PUSH/PULL | Yes | 746ns | 1.34M/sec | 606B |
-| PUB/SUB | Yes | 774ns | 1.29M/sec | 612B |
-| ROUTER/ROUTER | Yes | 797ns | 1.25M/sec | 612B |
+**Latency Characteristics**: Blocking and Poller modes achieve sub-microsecond latency for small messages (232-238ns), while NonBlocking incurs microsecond-level latency due to polling overhead.
 
-### Large Messages (64KB)
+### Receive Mode Selection Considerations
 
-Optimized for bulk data transfer.
+When choosing a receive mode, consider:
 
-#### Blocking Mode (Highest Performance)
+**Single Socket Applications**:
+- Blocking mode offers simple implementation and excellent performance when thread blocking is acceptable
+- Poller mode provides similar performance with event-driven architecture
+- NonBlocking mode may be suitable when integrating with existing polling loops
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| ROUTER/ROUTER | No | 13.61μs | 73.47K/sec | 624B |
-| PUB/SUB | No | 13.77μs | 72.61K/sec | 624B |
-| **PUSH/PULL** | No | **13.86μs** | **72.17K/sec** | **624B** |
-| PUSH/PULL | Yes | 16.42μs | 60.91K/sec | 624B |
-| PUB/SUB | Yes | 14.38μs | 69.56K/sec | 624B |
-| ROUTER/ROUTER | Yes | 16.59μs | 60.28K/sec | 624B |
+**Multiple Socket Applications**:
+- Poller mode enables monitoring multiple sockets with a single thread
+- Blocking mode would require one thread per socket
+- NonBlocking mode could service multiple sockets but with higher latency
 
-#### Non-Blocking Mode
+**Latency Requirements**:
+- Blocking and Poller modes deliver similar latency (within 2-3%)
+- NonBlocking mode adds 10ms+ latency per receive operation due to sleep intervals
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| PUB/SUB | No | 18.77μs | 53.27K/sec | 1176B |
-| PUSH/PULL | No | 22.75μs | 43.95K/sec | 685B |
-| ROUTER/ROUTER | No | 30.70μs | 32.58K/sec | 685B |
-| PUB/SUB | Yes | 20.00μs | 50.00K/sec | 685B |
-| ROUTER/ROUTER | Yes | 20.25μs | 49.39K/sec | 685B |
-| PUSH/PULL | Yes | 21.74μs | 46.00K/sec | 685B |
+**Thread Management**:
+- Blocking mode dedicates a thread to each socket
+- Poller mode allows one thread to service multiple sockets
+- NonBlocking mode enables integration with application event loops
 
-#### Poller Mode
+## Memory Strategy Benchmarks
 
-| Pattern | Server | Latency | Throughput | Allocated |
-|---------|--------|---------|------------|-----------|
-| ROUTER/ROUTER | No | 14.05μs | 71.19K/sec | 784B |
-| PUSH/PULL | No | 14.14μs | 70.72K/sec | 784B |
-| PUB/SUB | No | 14.42μs | 69.33K/sec | 784B |
-| PUSH/PULL | Yes | 15.08μs | 66.29K/sec | 784B |
-| PUB/SUB | Yes | 15.14μs | 66.03K/sec | 784B |
-| ROUTER/ROUTER | Yes | 15.62μs | 64.01K/sec | 784B |
+### How Each Strategy Works
 
-## Key Insights
+**ByteArray (`new byte[]`)**: Allocates a new byte array for each message. Simple and straightforward, but creates garbage collection pressure proportional to message size and frequency.
 
-### Mode Comparison
+**ArrayPool (`ArrayPool<byte>.Shared`)**: Rents buffers from a shared pool and returns them after use. Reduces GC allocations by reusing memory, though requires manual return management.
 
-1. **Blocking Mode**: Delivers the highest throughput and lowest latency across all message sizes. Recommended for maximum performance when blocking is acceptable.
+**Message (`zmq_msg_t`)**: Uses libzmq's native message structure, which manages memory internally. The .NET wrapper marshals data between native and managed memory as needed.
 
-2. **Non-Blocking Mode**: Provides 5-6x higher latency than blocking mode but enables asynchronous patterns. Suitable for applications requiring non-blocking I/O.
+**MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. Provides zero-copy semantics but requires careful lifecycle management.
 
-3. **Poller Mode**: Performance comparable to blocking mode with slightly higher memory allocation. Ideal for multi-socket applications requiring event-driven I/O.
+### Performance Results
 
-### Pattern Comparison
+All tests use Poller mode for reception.
 
-1. **PUSH/PULL**: Consistently delivers peak performance across all scenarios. Best choice for high-throughput pipelines.
+#### 64-Byte Messages
 
-2. **PUB/SUB**: Performance nearly identical to PUSH/PULL for small messages. Excellent for broadcast scenarios.
+| Strategy | Mean | Latency | Throughput | Gen0 | Allocated | Ratio |
+|----------|------|---------|------------|------|-----------|-------|
+| **ArrayPool** | 2.595 ms | 259.53 ns | 3.85M/sec | - | 1.07 KB | 0.98x |
+| **ByteArray** | 2.638 ms | 263.76 ns | 3.79M/sec | 3.91 | 1719.07 KB | 1.00x |
+| **Message** | 5.364 ms | 536.41 ns | 1.86M/sec | - | 625.32 KB | 2.03x |
+| **MessageZeroCopy** | 6.428 ms | 642.82 ns | 1.56M/sec | - | 625.32 KB | 2.44x |
 
-3. **ROUTER/ROUTER**: Slightly lower throughput (10-15%) due to routing overhead. Still achieves 4M+ msg/sec for small messages.
+#### 1500-Byte Messages
 
-### Message Size Impact
+| Strategy | Mean | Latency | Throughput | Gen0 | Allocated | Ratio |
+|----------|------|---------|------------|------|-----------|-------|
+| **Message** | 11.287 ms | 1.13 μs | 886.00K/sec | - | 625.32 KB | 0.98x |
+| **ByteArray** | 11.495 ms | 1.15 μs | 869.97K/sec | 78.13 | 29844.07 KB | 1.00x |
+| **ArrayPool** | 11.929 ms | 1.19 μs | 838.30K/sec | - | 3.01 KB | 1.04x |
+| **MessageZeroCopy** | 14.504 ms | 1.45 μs | 689.46K/sec | - | 625.32 KB | 1.26x |
 
-| Message Size | Peak Throughput | Latency | Use Case |
-|--------------|----------------|---------|----------|
-| **64B** | 4.95M/sec | 202ns | Control messages, signaling |
-| **1KB** | 1.36M/sec | 736ns | Typical application payloads |
-| **64KB** | 73.47K/sec | 13.61μs | Bulk data transfer |
+#### 65KB Messages
 
-### Memory Efficiency
+| Strategy | Mean | Latency | Throughput | Gen0 | Gen1 | Allocated | Ratio |
+|----------|------|---------|------------|------|------|-----------|-------|
+| **MessageZeroCopy** | 134.626 ms | 13.46 μs | 74.28K/sec | - | - | 625.49 KB | 0.90x |
+| **Message** | 142.068 ms | 14.21 μs | 70.39K/sec | - | - | 625.49 KB | 0.95x |
+| **ArrayPool** | 148.562 ms | 14.86 μs | 67.31K/sec | - | - | 65.21 KB | 0.99x |
+| **ByteArray** | 150.055 ms | 15.01 μs | 66.64K/sec | 3250 | 250 | 1280469.24 KB | 1.00x |
 
-- Extremely low allocations: 441-784 bytes per 10,000 messages
-- Minimal GC pressure even under high load
-- Consistent allocation patterns across all modes
+### Performance and GC Analysis
+
+**Small Messages (64B)**: Performance differences are modest across strategies. ByteArray and ArrayPool achieve highest throughput (3.79-3.85M msg/sec) with ArrayPool eliminating GC allocations. Message and MessageZeroCopy show 2-2.4x slower performance, likely due to native interop overhead being proportionally higher for small payloads.
+
+**Medium Messages (1500B)**: Performance converges across strategies (689-886K msg/sec). ByteArray begins showing GC pressure with 78 Gen0 collections per 10K messages. ArrayPool, Message, and MessageZeroCopy maintain zero GC collections. The 1500-byte size approximates Ethernet MTU, representing a common message size in network applications.
+
+**Large Messages (65KB)**: ByteArray strategy triggers significant garbage collection with 3250 Gen0 and 250 Gen1 collections, allocating 1.28GB for 10K messages. All pool-based and native strategies maintain zero GC collections. MessageZeroCopy achieves the highest throughput (74.28K msg/sec), while performance differences between strategies narrow to 0.90-1.00x relative range.
+
+**GC Pattern Transition**: The transition from minimal to significant GC pressure occurs around the 1500-byte message size. Below this threshold, all strategies show manageable GC behavior. Above it, ByteArray's allocation cost becomes increasingly significant.
+
+**Memory Allocation**: ArrayPool demonstrates the lowest overall allocation (1.07-65.21 KB across all sizes). ByteArray allocation scales linearly with message size and count. Message and MessageZeroCopy maintain consistent allocation (~625 KB) independent of message size.
+
+### Memory Strategy Selection Considerations
+
+When choosing a memory strategy, consider:
+
+**Message Size Distribution**:
+- For small messages (<1500B), performance differences are modest and GC pressure is manageable across all strategies
+- For large messages (>1500B), ByteArray generates substantial GC pressure
+- ArrayPool and native strategies maintain zero GC pressure regardless of message size
+
+**GC Sensitivity**:
+- Applications sensitive to GC pauses may prefer ArrayPool, Message, or MessageZeroCopy
+- Applications with infrequent messaging or small messages may find ByteArray acceptable
+- High-throughput applications benefit from GC-free strategies
+
+**Code Complexity**:
+- ByteArray offers the simplest implementation with automatic memory management
+- ArrayPool requires explicit Rent/Return calls and buffer lifecycle tracking
+- Message provides native integration with moderate complexity
+- MessageZeroCopy requires unmanaged memory management and free callbacks
+
+**Interop Overhead**:
+- For small messages, managed strategies (ByteArray, ArrayPool) show lower overhead
+- For large messages, native strategies (Message, MessageZeroCopy) can avoid managed/unmanaged copying
+
+**Performance Requirements**:
+- When throughput is critical and messages are small, ByteArray or ArrayPool are effective
+- When throughput is critical and messages are large, Message or MessageZeroCopy reduce GC impact
+- When latency consistency matters, GC-free strategies provide more predictable timing
 
 ## Running Benchmarks
 
 To run these benchmarks yourself:
 
 ```bash
-cd src/Net.Zmq.Benchmarks
+cd benchmarks/Net.Zmq.Benchmarks
 dotnet run -c Release
 ```
 
 For specific benchmarks:
 
 ```bash
-# Run only throughput benchmarks
-dotnet run -c Release --filter "*Throughput*"
+# Run only receive mode benchmarks
+dotnet run -c Release --filter "*ReceiveModeBenchmarks*"
 
-# Run only 64-byte message benchmarks
-dotnet run -c Release --filter "*64*"
+# Run only memory strategy benchmarks
+dotnet run -c Release --filter "*MemoryStrategyBenchmarks*"
 
-# Run only PUSH/PULL benchmarks
-dotnet run -c Release --filter "*PushPull*"
+# Run specific message size
+dotnet run -c Release --filter "*MessageSize=64*"
 ```
-
-## Comparison with Other Libraries
-
-Net.Zmq achieves performance on par with native ZeroMQ while providing:
-- Type-safe C# API
-- Modern .NET 8+ features
-- Automatic resource management
-- Cross-platform support (Windows, Linux, macOS)
 
 ## Notes
 
-- All benchmarks use inproc:// transport for consistent results
-- Results may vary based on hardware, OS configuration, and workload
-- Production performance will depend on network characteristics and message patterns
-- Benchmarks use concurrent mode to simulate real-world scenarios
+### Measurement Environment
+
+- All benchmarks use `inproc://` transport to eliminate network variability
+- Concurrent mode simulates realistic producer/consumer scenarios
+- Results represent steady-state performance after warmup
+- BenchmarkDotNet's ShortRun job provides statistically valid measurements with reduced runtime
+
+### Limitations and Considerations
+
+- `inproc://` transport performance differs from `tcp://` or `ipc://` transports
+- Actual production performance depends on network characteristics, message patterns, and system load
+- GC measurements reflect benchmark workload; application GC behavior depends on overall heap activity
+- Latency measurements include both send and receive operations for 10K messages
+- NonBlocking mode uses 10ms sleep interval; different sleep values would yield different results
+
+### Interpreting Results
+
+Performance ratios show relative performance where 1.00x is the baseline (slowest) within each test category. Lower mean times and higher throughput indicate better performance. Allocated memory and GC collections show memory management efficiency.
+
+The benchmarks reflect the performance characteristics of different approaches rather than absolute "best" choices. Selection depends on specific application requirements, message patterns, and architectural constraints.
 
 ## Full Benchmark Data
 
 For the complete BenchmarkDotNet output, see:
-`BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.ThroughputBenchmarks-report-github.md`
+- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.ReceiveModeBenchmarks-report-github.md`
+- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.MemoryStrategyBenchmarks-report-github.md`

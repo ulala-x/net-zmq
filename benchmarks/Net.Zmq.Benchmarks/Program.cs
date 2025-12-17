@@ -62,37 +62,37 @@ public class Program
         Console.Write("Testing ROUTER/ROUTER... ");
         try
         {
-            using var ctx = new Net.Zmq.Context();
-            using var router1 = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Router);
-            using var router2 = new Net.Zmq.Socket(ctx, Net.Zmq.SocketType.Router);
+            using var ctx = new Context();
+            using var router1 = new Socket(ctx, SocketType.Router);
+            using var router2 = new Socket(ctx, SocketType.Router);
 
-            var router1Id = System.Text.Encoding.UTF8.GetBytes("r1");
-            var router2Id = System.Text.Encoding.UTF8.GetBytes("r2");
+            var router1Id = "r1"u8.ToArray();
+            var router2Id = "r2"u8.ToArray();
 
-            router1.SetOption(Net.Zmq.SocketOption.Routing_Id, router1Id);
-            router1.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            router1.SetOption(Net.Zmq.SocketOption.Linger, 0);
+            router1.SetOption(SocketOption.Routing_Id, router1Id);
+            router1.SetOption(SocketOption.Rcvtimeo, 3000);
+            router1.SetOption(SocketOption.Linger, 0);
             router1.Bind("tcp://127.0.0.1:15583");
 
-            router2.SetOption(Net.Zmq.SocketOption.Routing_Id, router2Id);
-            router2.SetOption(Net.Zmq.SocketOption.Rcvtimeo, 3000);
-            router2.SetOption(Net.Zmq.SocketOption.Linger, 0);
+            router2.SetOption(SocketOption.Routing_Id, router2Id);
+            router2.SetOption(SocketOption.Rcvtimeo, 3000);
+            router2.SetOption(SocketOption.Linger, 0);
             router2.Connect("tcp://127.0.0.1:15583");
 
             Thread.Sleep(100);
 
             // Router2 sends to Router1 first (handshake)
-            router2.Send(router1Id, Net.Zmq.SendFlags.SendMore);
+            router2.Send(router1Id, SendFlags.SendMore);
             router2.Send(new byte[] { 1, 2, 3 });
 
             // Router1 receives (learns Router2's identity)
-            using var msg = new Net.Zmq.Message(64);
+            using var msg = new Message(64);
             router1.Recv(msg); // sender identity
             msg.Rebuild(64);
             router1.Recv(msg); // payload
 
             // Now Router1 can send to Router2
-            router1.Send(router2Id, Net.Zmq.SendFlags.SendMore);
+            router1.Send(router2Id, SendFlags.SendMore);
             router1.Send(new byte[] { 4, 5, 6 });
 
             // Router2 receives

@@ -24,7 +24,7 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 [GcServer(true)]
 public class MemoryStrategyBenchmarks
 {
-    [Params(64, 1024, 65536)]
+    [Params(64, 1500, 65536)]
     public int MessageSize { get; set; }
 
     [Params(10000)]

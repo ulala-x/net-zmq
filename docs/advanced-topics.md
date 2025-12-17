@@ -16,6 +16,279 @@ Net.Zmq achieves:
 
 See [BENCHMARKS.md](https://github.com/ulala-x/net-zmq/blob/main/BENCHMARKS.md) for detailed performance metrics.
 
+### Receive Modes
+
+Net.Zmq provides three receive modes with different performance characteristics and use cases.
+
+#### How Each Mode Works
+
+**Blocking Mode**: The calling thread blocks on `Recv()` until a message arrives. The thread yields to the operating system scheduler while waiting, consuming minimal CPU resources. This is the simplest approach with deterministic waiting behavior.
+
+**NonBlocking Mode**: The application repeatedly calls `TryRecv()` to poll for messages. When no message is immediately available, the thread typically sleeps for a short interval (e.g., 10ms) before retrying. This prevents thread blocking but introduces latency due to the sleep interval.
+
+**Poller Mode**: Event-driven reception using `zmq_poll()` internally. The application waits for socket events without busy-waiting or blocking individual sockets. This mode efficiently handles multiple sockets with a single thread and provides responsive event notification.
+
+#### Usage Examples
+
+Blocking mode provides the simplest implementation:
+
+```csharp
+using var context = new Context();
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// Blocks until message arrives
+var buffer = new byte[1024];
+int size = socket.Recv(buffer);
+ProcessMessage(buffer.AsSpan(0, size));
+```
+
+NonBlocking mode integrates with polling loops:
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+var buffer = new byte[1024];
+while (running)
+{
+    if (socket.TryRecv(buffer, out int size))
+    {
+        ProcessMessage(buffer.AsSpan(0, size));
+    }
+    else
+    {
+        Thread.Sleep(10); // Wait before retry
+    }
+}
+```
+
+Poller mode supports multiple sockets:
+
+```csharp
+using var socket1 = new Socket(context, SocketType.Pull);
+using var socket2 = new Socket(context, SocketType.Pull);
+socket1.Connect("tcp://localhost:5555");
+socket2.Connect("tcp://localhost:5556");
+
+using var poller = new Poller(2);
+poller.Add(socket1, PollEvents.In);
+poller.Add(socket2, PollEvents.In);
+
+var buffer = new byte[1024];
+while (running)
+{
+    int eventCount = poller.Poll(1000); // 1 second timeout
+
+    if (eventCount > 0)
+    {
+        if (socket1.TryRecv(buffer, out int size))
+        {
+            ProcessMessage1(buffer.AsSpan(0, size));
+        }
+
+        if (socket2.TryRecv(buffer, out size))
+        {
+            ProcessMessage2(buffer.AsSpan(0, size));
+        }
+    }
+}
+```
+
+#### Performance Characteristics
+
+Benchmarked on ROUTER-to-ROUTER pattern with concurrent sender and receiver (10,000 messages, Intel Core Ultra 7 265K):
+
+**64-Byte Messages**:
+- Blocking: 2.325 ms (4.30M msg/sec, 232.52 ns latency)
+- Poller: 2.376 ms (4.21M msg/sec, 237.59 ns latency)
+- NonBlocking: 11.447 ms (873.62K msg/sec, 1.14 μs latency)
+
+**1500-Byte Messages**:
+- Poller: 10.552 ms (947.66K msg/sec, 1.06 μs latency)
+- Blocking: 11.040 ms (905.79K msg/sec, 1.10 μs latency)
+- NonBlocking: 14.909 ms (670.72K msg/sec, 1.49 μs latency)
+
+**65KB Messages**:
+- Poller: 167.479 ms (59.71K msg/sec, 16.75 μs latency)
+- Blocking: 168.915 ms (59.20K msg/sec, 16.89 μs latency)
+- NonBlocking: 351.448 ms (28.45K msg/sec, 35.14 μs latency)
+
+Blocking and Poller modes deliver similar performance (96-102% relative), with Poller allocating slightly more memory (323-504 bytes vs 203-384 bytes per 10K messages) for polling infrastructure. NonBlocking mode shows 1.35-4.92x slower performance due to sleep overhead when messages are not immediately available.
+
+#### Selection Considerations
+
+**Single Socket Applications**:
+- Blocking mode offers simple implementation when thread blocking is acceptable
+- Poller mode provides event-driven architecture with similar performance
+- NonBlocking mode enables integration with existing polling loops
+
+**Multiple Socket Applications**:
+- Poller mode monitors multiple sockets with a single thread
+- Blocking mode requires one thread per socket
+- NonBlocking mode can service multiple sockets with higher latency
+
+**Latency Requirements**:
+- Blocking and Poller modes achieve sub-microsecond latency (232-238 ns for 64-byte messages)
+- NonBlocking mode adds millisecond-level latency due to sleep intervals
+
+**Thread Management**:
+- Blocking mode dedicates threads to sockets
+- Poller mode allows one thread to service multiple sockets
+- NonBlocking mode integrates with application event loops
+
+### Memory Strategies
+
+Net.Zmq supports multiple memory management strategies for send and receive operations, each with different performance and garbage collection characteristics.
+
+#### How Each Strategy Works
+
+**ByteArray**: Allocates a new byte array (`new byte[]`) for each message. This provides simple, automatic memory management but creates garbage collection pressure proportional to message size and frequency.
+
+**ArrayPool**: Rents buffers from `ArrayPool<byte>.Shared` and returns them after use. This reduces GC allocations by reusing memory from a shared pool, though it requires manual rent/return lifecycle management.
+
+**Message**: Uses libzmq's native message structure (`zmq_msg_t`) which manages memory internally. The .NET wrapper marshals data between native and managed memory as needed. This approach leverages native memory management.
+
+**MessageZeroCopy**: Allocates unmanaged memory directly (`Marshal.AllocHGlobal`) and transfers ownership to libzmq via a free callback. This provides true zero-copy semantics by avoiding managed memory entirely, but requires careful lifecycle management.
+
+#### Usage Examples
+
+ByteArray approach uses standard .NET arrays:
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// Allocate new buffer for each receive
+var buffer = new byte[1024];
+int size = socket.Recv(buffer);
+
+// Create output buffer for external delivery
+var output = new byte[size];
+buffer.AsSpan(0, size).CopyTo(output);
+DeliverMessage(output);
+```
+
+ArrayPool approach reuses buffers:
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// Receive into fixed buffer
+var recvBuffer = new byte[1024];
+int size = socket.Recv(recvBuffer);
+
+// Rent buffer from pool for external delivery
+var output = ArrayPool<byte>.Shared.Rent(size);
+try
+{
+    recvBuffer.AsSpan(0, size).CopyTo(output);
+    DeliverMessage(output.AsSpan(0, size));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(output);
+}
+```
+
+Message approach uses native memory:
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// Receive into native message
+using var message = new Message();
+socket.Recv(message);
+
+// Access data directly without copying
+ProcessMessage(message.Data); // ReadOnlySpan<byte>
+```
+
+MessageZeroCopy approach for sending:
+
+```csharp
+using var socket = new Socket(context, SocketType.Push);
+socket.Connect("tcp://localhost:5555");
+
+// Allocate unmanaged memory
+nint nativePtr = Marshal.AllocHGlobal(dataSize);
+unsafe
+{
+    var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
+    sourceData.CopyTo(nativeSpan);
+}
+
+// Transfer ownership to libzmq
+using var message = new Message(nativePtr, dataSize, ptr =>
+{
+    Marshal.FreeHGlobal(ptr); // Called when libzmq is done
+});
+
+socket.Send(message);
+```
+
+#### Performance and GC Characteristics
+
+Benchmarked with Poller mode on ROUTER-to-ROUTER pattern (10,000 messages, Intel Core Ultra 7 265K):
+
+**64-Byte Messages**:
+- ArrayPool: 2.595 ms (3.85M msg/sec), 0 GC, 1.07 KB allocated
+- ByteArray: 2.638 ms (3.79M msg/sec), 3.91 Gen0, 1719.07 KB allocated
+- Message: 5.364 ms (1.86M msg/sec), 0 GC, 625.32 KB allocated
+- MessageZeroCopy: 6.428 ms (1.56M msg/sec), 0 GC, 625.32 KB allocated
+
+**1500-Byte Messages**:
+- Message: 11.287 ms (886.00K msg/sec), 0 GC, 625.32 KB allocated
+- ByteArray: 11.495 ms (869.97K msg/sec), 78.13 Gen0, 29844.07 KB allocated
+- ArrayPool: 11.929 ms (838.30K msg/sec), 0 GC, 3.01 KB allocated
+- MessageZeroCopy: 14.504 ms (689.46K msg/sec), 0 GC, 625.32 KB allocated
+
+**65KB Messages**:
+- MessageZeroCopy: 134.626 ms (74.28K msg/sec), 0 GC, 625.49 KB allocated
+- Message: 142.068 ms (70.39K msg/sec), 0 GC, 625.49 KB allocated
+- ArrayPool: 148.562 ms (67.31K msg/sec), 0 GC, 65.21 KB allocated
+- ByteArray: 150.055 ms (66.64K msg/sec), 3250 Gen0 + 250 Gen1, 1280469.24 KB allocated
+
+#### The 1500-Byte Boundary
+
+The transition from minimal to significant GC pressure occurs around 1500 bytes, which approximates Ethernet MTU (Maximum Transmission Unit):
+
+- Below 1500B: All strategies show manageable GC behavior
+- At 1500B: ByteArray begins showing GC pressure (78 Gen0 collections)
+- Above 1500B: ByteArray triggers substantial garbage collection (3250 Gen0 + 250 Gen1 collections at 65KB)
+
+ArrayPool, Message, and MessageZeroCopy maintain zero GC collections regardless of message size.
+
+#### Selection Considerations
+
+**Message Size Distribution**:
+- For small messages (<1500B), performance differences are modest and GC pressure is manageable across all strategies
+- For large messages (>1500B), ByteArray generates substantial GC pressure
+- ArrayPool and native strategies maintain zero GC pressure regardless of message size
+
+**GC Sensitivity**:
+- Applications sensitive to GC pauses benefit from ArrayPool, Message, or MessageZeroCopy
+- Applications with infrequent messaging or consistently small messages may find ByteArray acceptable
+- High-throughput applications with variable message sizes benefit from GC-free strategies
+
+**Code Complexity**:
+- ByteArray offers the simplest implementation with automatic memory management
+- ArrayPool requires explicit Rent/Return calls and buffer lifecycle tracking
+- Message provides native integration with moderate complexity
+- MessageZeroCopy requires unmanaged memory management and free callbacks
+
+**Interop Overhead**:
+- For small messages, managed strategies (ByteArray, ArrayPool) show lower overhead
+- For large messages, native strategies (Message, MessageZeroCopy) can avoid managed/unmanaged copying
+- The performance crossover depends on message size and access patterns
+
+**Performance Requirements**:
+- When throughput is critical and messages are small, ByteArray or ArrayPool are effective
+- When throughput is critical and messages are large, Message or MessageZeroCopy reduce GC impact
+- When latency consistency matters, GC-free strategies provide more predictable timing
+
 ### I/O Threads
 
 Configure I/O threads based on your workload:
