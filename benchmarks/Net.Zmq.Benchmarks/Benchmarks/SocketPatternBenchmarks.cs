@@ -127,7 +127,7 @@ public class SocketPatternBenchmarks
     [Benchmark(Baseline = true)]
     public void PushPull_Throughput() => Run(
         _pull,
-        () => _push.Send(_sendData,SendFlags.SendMore),
+        () => _push.Send(_sendData, SendFlags.DontWait),
         () => _pull.Recv(_recvBuffer),
         () => _pull.TryRecv(_recvBuffer, out _)
     );
@@ -135,7 +135,7 @@ public class SocketPatternBenchmarks
     [Benchmark]
     public void PubSub_Throughput() => Run(
         _sub,
-        () => _pub.Send(_sendData, SendFlags.SendMore),
+        () => _pub.Send(_sendData, SendFlags.DontWait),
         () => _sub.Recv(_recvBuffer),
         () => _sub.TryRecv(_recvBuffer, out _)
     );
@@ -143,7 +143,7 @@ public class SocketPatternBenchmarks
     [Benchmark]
     public void RouterRouter_Throughput() => Run(
         _router2,
-        () => { _router1.Send(_router2Id, SendFlags.SendMore); _router1.Send(_sendData); },
+        () => { _router1.Send(_router2Id, SendFlags.SendMore); _router1.Send(_sendData, SendFlags.DontWait); },
         () => { _router2.Recv(_identityBuffer); _router2.Recv(_recvBuffer); },
         () => { if (!_router2.TryRecv(_identityBuffer, out _)) return false; _router2.TryRecv(_recvBuffer, out _); return true; }
     );
