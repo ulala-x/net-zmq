@@ -5,11 +5,12 @@ using System.Runtime.InteropServices;
 namespace Net.Zmq.Benchmarks.Benchmarks;
 
 /// <summary>
-/// Compares four memory management approaches for ZeroMQ send/recv operations:
+/// Compares five memory management approaches for ZeroMQ send/recv operations:
 /// 1. ByteArray (Baseline): Allocate new byte[] for each message (max GC pressure)
 /// 2. ArrayPool: Reuse byte[] from ArrayPool.Shared (min GC pressure)
 /// 3. Message: Use Message objects backed by native memory (copy to native)
 /// 4. MessageZeroCopy: Use Message with zmq_msg_init_data (true zero-copy)
+/// 5. MessagePooled: Use MessagePool to reuse native memory buffers (pooled zero-copy)
 ///
 /// Scenario: ROUTER-to-ROUTER multipart messaging (identity + body)
 /// - Sender creates buffers and sends data
@@ -24,7 +25,7 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 [GcServer(true)]
 public class MemoryStrategyBenchmarks
 {
-    [Params(64, 1500, 65536)]
+    [Params(64, 512, 1024, 65536)]
     public int MessageSize { get; set; }
 
     [Params(10000)]
@@ -67,11 +68,28 @@ public class MemoryStrategyBenchmarks
         _router2.Send("hi"u8.ToArray());
         _router1.Recv(_identityBuffer);
         _router1.Recv(_identityBuffer);
+
+        // Pre-warm MessagePool with buffers for this message size
+        // Allocate 400 buffers to ensure 100% hit rate during benchmark
+        MessagePool.Shared.Prewarm(new[] { MessageSize }, 400);
+        Console.WriteLine($"Pre-warmed MessagePool with 400 buffers of size {MessageSize}");
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
+        // Print MessagePool statistics
+        var stats = MessagePool.Shared.GetStatistics();
+        Console.WriteLine($"MessagePool Statistics: {stats}");
+
+        if (stats.OutstandingBuffers != 0)
+        {
+            Console.WriteLine($"WARNING: {stats.OutstandingBuffers} buffers not returned to pool (possible memory leak)");
+        }
+
+        // Clear the pool to avoid state carryover between benchmark runs
+        MessagePool.Shared.Clear();
+
         _ctx.Shutdown();
         _router1?.Dispose();
         _router2?.Dispose();
@@ -361,6 +379,67 @@ public class MemoryStrategyBenchmarks
                 Marshal.FreeHGlobal(ptr);
             });
 
+            _router1.Send(msg, SendFlags.DontWait);
+        }
+
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
+    }
+
+    // ========================================
+    // MessagePooled approach: Pooled zero-copy native memory
+    // ========================================
+    /// <summary>
+    /// MessagePooled approach: Use MessagePool to reuse native memory buffers with zero-copy.
+    /// Reduces allocation/deallocation overhead by pooling native memory buffers.
+    /// Expected: Similar GC stats to MessageZeroCopy, potentially better performance by eliminating repeated alloc/free.
+    /// </summary>
+    [Benchmark]
+    public void MessagePooled_SendRecv()
+    {
+        var countdown = new CountdownEvent(1);
+        var thread = new Thread(() =>
+        {
+            int n = 0;
+
+            while (n < MessageCount)
+            {
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+                using (var msg = new Message())
+                {
+                    _router2.Recv(msg);
+                    // Use msg.Data directly (no copy to managed memory)
+                    // External consumer would use msg.Data here
+                }
+
+                n++;
+
+                // Batch receive available messages
+                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                {
+                    // Receive into Message (already zero-copy from ZMQ side)
+                    using var msg = new Message();
+                    _router2.Recv(msg);
+                    // Use msg.Data directly (no copy to managed memory)
+                    // External consumer would use msg.Data here
+
+                    n++;
+                }
+            }
+            countdown.Signal();
+        });
+        thread.Start();
+
+        // Sender: use MessagePool to rent pooled native memory + zero-copy Message
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+
+            // Rent from MessagePool (automatically returned on disposal)
+            using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, MessageSize));
             _router1.Send(msg, SendFlags.DontWait);
         }
 
