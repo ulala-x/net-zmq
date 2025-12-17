@@ -260,16 +260,16 @@ using var socket = new Socket(context, SocketType.Rep);
 
 // Set options
 socket.SetOption(SocketOption.Linger, 1000);           // Linger time (ms)
-socket.SetOption(SocketOption.SendHwm, 1000);          // Send high water mark
-socket.SetOption(SocketOption.RcvHwm, 1000);           // Receive high water mark
-socket.SetOption(SocketOption.SendTimeout, 5000);      // Send timeout (ms)
-socket.SetOption(SocketOption.RcvTimeout, 5000);       // Receive timeout (ms)
+socket.SetOption(SocketOption.Sndhwm, 1000);           // Send high water mark
+socket.SetOption(SocketOption.Rcvhwm, 1000);           // Receive high water mark
+socket.SetOption(SocketOption.Sndtimeo, 5000);         // Send timeout (ms)
+socket.SetOption(SocketOption.Rcvtimeo, 5000);         // Receive timeout (ms)
 socket.SetOption(SocketOption.Sndbuf, 131072);         // Send buffer size
 socket.SetOption(SocketOption.Rcvbuf, 131072);         // Receive buffer size
 
 // Get options
 int linger = socket.GetOption<int>(SocketOption.Linger);
-int sendHwm = socket.GetOption<int>(SocketOption.SendHwm);
+int sendHwm = socket.GetOption<int>(SocketOption.Sndhwm);
 
 Console.WriteLine($"Linger: {linger}ms, Send HWM: {sendHwm}");
 ```
@@ -279,10 +279,10 @@ Console.WriteLine($"Linger: {linger}ms, Send HWM: {sendHwm}");
 | Option | Type | Description |
 |--------|------|-------------|
 | `Linger` | int | Time to wait for pending messages on close (ms) |
-| `SendHwm` | int | High water mark for outbound messages |
-| `RcvHwm` | int | High water mark for inbound messages |
-| `SendTimeout` | int | Send timeout in milliseconds |
-| `RcvTimeout` | int | Receive timeout in milliseconds |
+| `Sndhwm` | int | High water mark for outbound messages |
+| `Rcvhwm` | int | High water mark for inbound messages |
+| `Sndtimeo` | int | Send timeout in milliseconds |
+| `Rcvtimeo` | int | Receive timeout in milliseconds |
 | `Sndbuf` | int | Kernel send buffer size |
 | `Rcvbuf` | int | Kernel receive buffer size |
 | `Routing_Id` | byte[] | Socket identity for ROUTER sockets |

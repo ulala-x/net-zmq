@@ -39,6 +39,7 @@ public class Program
             .AddColumnProvider(DefaultColumnProviders.Instance)
             .AddColumn(new LatencyColumn())
             .AddColumn(new MessagesPerSecondColumn())
+            .AddColumn(new DataThroughputColumn())
             .AddExporter(MarkdownExporter.GitHub)
             .AddDiagnoser(MemoryDiagnoser.Default)
             .AddJob(job

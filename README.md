@@ -190,13 +190,15 @@ Net.Zmq provides multiple receive modes (Blocking, NonBlocking, Poller) and memo
 
 ### Representative Performance
 
-Performance characteristics vary based on message size, receive mode, and memory strategy:
+Performance characteristics vary based on message size, receive mode, and memory strategy.
 
-| Message Size | Throughput Range | Latency Range | Notes |
-|--------------|------------------|---------------|-------|
-| **64 bytes** | 1.56M - 4.30M/sec | 233 - 643 ns | Blocking and Poller modes show similar performance; managed strategies preferred |
-| **1.5 KB** | 670K - 948K/sec | 1.06 - 1.49 μs | Performance converges across strategies; GC pressure begins with ByteArray |
-| **65 KB** | 28K - 74K/sec | 13.5 - 35.1 μs | Native strategies avoid GC pressure; NonBlocking shows degraded performance |
+**Note**: The ranges below represent results across all receive modes (Blocking, Poller, NonBlocking with Sleep(1ms)) and memory strategies (ByteArray, ArrayPool, Message, MessageZeroCopy).
+
+| Message Size | Throughput Range | Data Throughput | Latency Range | Notes |
+|--------------|------------------|-----------------|---------------|-------|
+| **64 bytes** | 1.53M - 4.30M/sec | 0.78 - 2.20 Gbps | 232 - 654 ns | Blocking and Poller modes show similar performance; managed strategies preferred |
+| **1.5 KB** | 705K - 977K/sec | 8.47 - 11.72 Gbps | 1.02 - 1.42 μs | Performance converges across strategies; GC pressure begins with ByteArray |
+| **65 KB** | 33K - 77K/sec | 2.06 - 4.68 GB/s | 13.1 - 29.6 μs | Native strategies avoid GC pressure; NonBlocking shows degraded performance |
 
 ### Selection Guidance
 

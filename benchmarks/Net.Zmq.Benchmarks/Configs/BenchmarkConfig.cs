@@ -59,19 +59,19 @@ public class LatencyColumn : IColumn
 }
 
 /// <summary>
-/// Custom column that displays messages per second (msg/sec).
+/// Custom column that displays messages per second (Messages/sec).
 /// Automatically detects MessageCount parameter for throughput benchmarks.
 /// </summary>
 public class MessagesPerSecondColumn : IColumn
 {
     public string Id => "MsgPerSec";
-    public string ColumnName => "msg/sec";
+    public string ColumnName => "Messages/sec";
     public bool AlwaysShow => true;
     public ColumnCategory Category => ColumnCategory.Custom;
     public int PriorityInCategory => 0;
     public bool IsNumeric => true;
     public UnitType UnitType => UnitType.Dimensionless;
-    public string Legend => "Messages processed per second (total throughput)";
+    public string Legend => "Messages processed per second (message throughput)";
 
     public string GetValue(Summary summary, BenchmarkCase benchmarkCase)
     {
@@ -105,6 +105,66 @@ public class MessagesPerSecondColumn : IColumn
 }
 
 /// <summary>
+/// Custom column that displays data throughput (Gbps or GB/s).
+/// Calculates throughput as Messages/sec × MessageSize.
+/// </summary>
+public class DataThroughputColumn : IColumn
+{
+    public string Id => "DataThroughput";
+    public string ColumnName => "Data Throughput";
+    public bool AlwaysShow => true;
+    public ColumnCategory Category => ColumnCategory.Custom;
+    public int PriorityInCategory => 1;
+    public bool IsNumeric => true;
+    public UnitType UnitType => UnitType.Dimensionless;
+    public string Legend => "Data throughput (Messages/sec × MessageSize)";
+
+    public string GetValue(Summary summary, BenchmarkCase benchmarkCase)
+    {
+        var report = summary[benchmarkCase];
+        if (report?.ResultStatistics == null)
+            return "N/A";
+
+        var meanNs = report.ResultStatistics.Mean;
+        var opsPerSec = 1_000_000_000.0 / meanNs;  // ns to sec conversion
+
+        // Get MessageCount parameter
+        var messageCountParam = benchmarkCase.Parameters.Items
+            .FirstOrDefault(p => p.Name == "MessageCount");
+        var messageCount = messageCountParam?.Value is int count ? count : 1;
+
+        // Get MessageSize parameter
+        var messageSizeParam = benchmarkCase.Parameters.Items
+            .FirstOrDefault(p => p.Name == "MessageSize");
+        var messageSize = messageSizeParam?.Value is int size ? size : 0;
+
+        if (messageSize == 0)
+            return "N/A";
+
+        var msgPerSec = opsPerSec * messageCount;
+        var bytesPerSec = msgPerSec * messageSize;
+
+        // For 64KB messages, use GB/s; for smaller messages, use Gbps
+        if (messageSize >= 65536)
+        {
+            var gbPerSec = bytesPerSec / 1_073_741_824.0;  // bytes to GB
+            return $"{gbPerSec:N2} GB/s";
+        }
+        else
+        {
+            var gbps = (bytesPerSec * 8) / 1_000_000_000.0;  // bytes to bits to Gbps
+            return $"{gbps:N2} Gbps";
+        }
+    }
+
+    public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)
+        => GetValue(summary, benchmarkCase);
+
+    public bool IsDefault(Summary summary, BenchmarkCase benchmarkCase) => false;
+    public bool IsAvailable(Summary summary) => true;
+}
+
+/// <summary>
 /// Short run configuration for quick testing and development.
 /// </summary>
 public class ShortRunConfig : ManualConfig
@@ -115,6 +175,7 @@ public class ShortRunConfig : ManualConfig
         AddColumnProvider(DefaultColumnProviders.Instance);
         AddColumn(new LatencyColumn());
         AddColumn(new MessagesPerSecondColumn());
+        AddColumn(new DataThroughputColumn());
         AddExporter(MarkdownExporter.GitHub);
 
         AddDiagnoser(MemoryDiagnoser.Default);

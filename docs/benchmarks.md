@@ -79,15 +79,13 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 1. Repeated loop in user space
 2. `TryRecv()` checks for messages (internally returns `EAGAIN`/`EWOULDBLOCK` if none available)
 3. Returns immediately with `false` if no message
-4. User code decides: `Thread.Sleep()` (adds latency) or `Thread.Yield()` (wastes CPU)
+4. User code calls `Thread.Sleep(1ms)` before retry
 5. Loop continues without kernel assistance
 
 **Characteristics**:
 - **No kernel-level waiting** - all polling happens in user space
-- Fundamental trade-off: CPU efficiency vs performance
-  - `Thread.Yield()`: High CPU usage (~100% when idle) but better performance
-  - `Thread.Sleep()`: Low CPU usage but poor performance (1.4-5x slower)
-- **Not recommended for production** due to inherent inefficiency
+- `Thread.Sleep(1ms)` reduces CPU usage but adds latency overhead (1.3-1.7x slower)
+- **Not recommended for production** due to poor performance
 
 #### Why Blocking and Poller Are Efficient
 
@@ -95,14 +93,32 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 |------|-----------------|----------------|------------|------------|
 | **Blocking** | Kernel space | Kernel interrupt | 0% | ✓ Optimal for single socket |
 | **Poller** | Kernel space | Kernel (epoll/kqueue) | 0% | ✓ Optimal for multiple sockets |
-| **NonBlocking** | User space | None (continuous polling) | ~100% (Yield) or Low (Sleep) | ✗ Inefficient trade-off |
+| **NonBlocking** | User space | None (continuous polling) | Low (Sleep 1ms) | ✗ Poor performance |
 
 **Key Insight**: Blocking and Poller delegate waiting to the kernel, which:
 - Uses hardware interrupts to detect data arrival instantly
 - Keeps threads asleep (0% CPU) until events occur
 - Wakes threads at the exact moment needed
 
-NonBlocking lacks this kernel support, forcing continuous checking in user space, resulting in either wasted CPU cycles (Yield) or added latency (Sleep).
+NonBlocking lacks this kernel support, forcing continuous checking in user space with Thread.Sleep() adding latency overhead.
+
+### Understanding Benchmark Metrics
+
+The benchmark results include the following columns:
+
+| Column | Description |
+|--------|-------------|
+| **Mean** | Average execution time to send and receive all messages (lower is better) |
+| **Error** | Standard error of the mean (statistical margin of error) |
+| **StdDev** | Standard deviation showing measurement variability |
+| **Ratio** | Performance ratio compared to baseline (1.00x = baseline, higher = slower) |
+| **Latency** | Per-message latency calculated as `Mean / MessageCount` |
+| **Messages/sec** | Message throughput - how many messages processed per second |
+| **Data Throughput** | Actual network bandwidth (Gbps for small messages, GB/s for large messages) |
+| **Allocated** | Total memory allocated during the benchmark |
+| **Gen0/Gen1** | Number of garbage collection cycles (lower is better) |
+
+**How to read the results**: Lower Mean times and higher Messages/sec indicate better performance. Ratio shows relative performance where 1.00x is the baseline (typically the slowest method in each category).
 
 ### Performance Results
 
@@ -110,55 +126,40 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 
 #### 64-Byte Messages
 
-| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
-|------|------|---------|--------------|-----------|-------|
-| **Blocking** | 2.325 ms | 232.52 ns | 4.30M | 203 B | 1.00x |
-| **Poller** | 2.376 ms | 237.59 ns | 4.21M | 323 B | 1.02x |
-| NonBlocking (Yield) | 2.643 ms | 264.29 ns | 3.78M | 203 B | 1.14x |
-| NonBlocking (Sleep 1ms) | 3.318 ms | 331.84 ns | 3.01M | 203 B | 1.43x |
-| NonBlocking (Sleep 5ms) | 6.363 ms | 636.28 ns | 1.57M | 206 B | 2.74x |
-| NonBlocking (Sleep 10ms) | 11.386 ms | 1.14 μs | 878.28K | 212 B | 4.90x |
+| Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
+|------|------|---------|--------------|-----------------|-----------|-------|
+| **Blocking** | 2.324 ms | 232.37 ns | 4.30M | 2.20 Gbps | 203 B | 1.00x |
+| **Poller** | 2.414 ms | 241.36 ns | 4.14M | 2.12 Gbps | 323 B | 1.04x |
+| NonBlocking (Sleep 1ms) | 3.366 ms | 336.57 ns | 2.97M | 1.52 Gbps | 203 B | 1.45x |
 
 #### 1500-Byte Messages
 
-| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
-|------|------|---------|--------------|-----------|-------|
-| NonBlocking (Yield) | 10.461 ms | 1.05 μs | 955.92K | 212 B | 0.95x |
-| **Poller** | 10.552 ms | 1.06 μs | 947.66K | 332 B | 0.96x |
-| **Blocking** | 11.040 ms | 1.10 μs | 905.79K | 212 B | 1.00x |
-| NonBlocking (Sleep 1ms) | 13.346 ms | 1.33 μs | 749.26K | 212 B | 1.21x |
-| NonBlocking (Sleep 5ms) | 14.931 ms | 1.49 μs | 669.73K | 212 B | 1.35x |
-| NonBlocking (Sleep 10ms) | 15.141 ms | 1.51 μs | 660.45K | 212 B | 1.37x |
+| Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
+|------|------|---------|--------------|-----------------|-----------|-------|
+| **Blocking** | 10.238 ms | 1.02 μs | 976.77K | 11.72 Gbps | 212 B | 1.00x |
+| **Poller** | 10.652 ms | 1.07 μs | 938.82K | 11.27 Gbps | 332 B | 1.04x |
+| NonBlocking (Sleep 1ms) | 13.377 ms | 1.34 μs | 747.53K | 8.97 Gbps | 212 B | 1.31x |
 
 #### 65KB Messages
 
-| Mode | Mean | Latency | Messages/sec | Allocated | Ratio |
-|------|------|---------|--------------|-----------|-------|
-| NonBlocking (Yield) | 140.122 ms | 14.01 μs | 71.37K | 384 B | 0.83x |
-| **Poller** | 167.479 ms | 16.75 μs | 59.71K | 504 B | 0.99x |
-| **Blocking** | 168.915 ms | 16.89 μs | 59.20K | 384 B | 1.00x |
-| NonBlocking (Sleep 10ms) | 202.023 ms | 20.20 μs | 49.50K | 445 B | 1.20x |
-| NonBlocking (Sleep 5ms) | 264.741 ms | 26.47 μs | 37.77K | 568 B | 1.57x |
-| NonBlocking (Sleep 1ms) | 279.412 ms | 27.94 μs | 35.79K | 568 B | 1.65x |
+| Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
+|------|------|---------|--------------|-----------------|-----------|-------|
+| **Poller** | 152.737 ms | 15.27 μs | 65.47K | 4.00 GB/s | 504 B | 0.88x |
+| **Blocking** | 174.529 ms | 17.45 μs | 57.30K | 3.50 GB/s | 445 B | 1.01x |
+| NonBlocking (Sleep 1ms) | 295.771 ms | 29.58 μs | 33.81K | 2.06 GB/s | 568 B | 1.70x |
 
 ### Performance Analysis
 
 **Blocking vs Poller**: Performance is nearly identical across all message sizes (96-102% relative performance). Both modes use kernel-level waiting mechanisms that efficiently wake threads when messages arrive. Poller allocates slightly more memory (323-504 bytes vs 203-384 bytes for 10K messages) due to polling infrastructure, but the difference is negligible in practice.
 
-**NonBlocking Performance and Trade-offs**: NonBlocking mode faces a fundamental trade-off between CPU usage and performance:
-
-- **Thread.Yield()**: Achieves the best NonBlocking performance (1.14x slower than Blocking for 64B) but causes CPU busy-waiting. When no messages are available, the thread continuously polls and yields, resulting in high CPU usage (potentially 100%).
-- **Thread.Sleep(1ms)**: Reduces CPU usage but adds latency (1.43x slower than Blocking for 64B).
-- **Thread.Sleep(5-10ms)**: Further reduces CPU usage but significantly degrades performance (2.74-4.90x slower than Blocking for 64B).
-
-**Why NonBlocking is Slower**: Even with `Thread.Yield()`, NonBlocking remains slower than Blocking because:
+**NonBlocking Performance**: NonBlocking mode with `Thread.Sleep(1ms)` is consistently slower than Blocking and Poller modes (1.31-1.70x slower) due to:
 1. User-space polling with `TryRecv()` has overhead compared to kernel-level blocking
-2. Thread scheduling overhead from repeated yielding
+2. Thread.Sleep() adds latency even with minimal 1ms sleep interval
 3. Blocking and Poller modes use efficient kernel mechanisms (`recv()` syscall and `zmq_poll()`) that wake threads immediately when messages arrive
 
-**Message Size Impact**: The Sleep overhead is most pronounced with small messages (64B) where processing is fast. With large messages (65KB), NonBlocking with Yield can match or exceed Blocking performance (0.83x) because message processing time dominates over polling overhead.
+**Message Size Impact**: The Sleep overhead is most pronounced with large messages (65KB) where NonBlocking is 1.70x slower, while for small messages (64B) it's 1.45x slower.
 
-**Recommendation**: NonBlocking mode is not recommended for production use due to the CPU usage vs performance trade-off. Use Blocking for single-socket applications or Poller for multi-socket scenarios.
+**Recommendation**: NonBlocking mode is not recommended for production use due to poor performance. Use Blocking for single-socket applications or Poller for multi-socket scenarios.
 
 ### Receive Mode Selection Considerations
 
@@ -170,9 +171,8 @@ When choosing a receive mode, consider:
 - Both modes provide optimal CPU efficiency (0% when idle) and low latency
 
 **NonBlocking Mode Limitations**:
-- **Not recommended for production** due to fundamental trade-offs:
-  - `Thread.Yield()`: Good performance but 100% CPU usage when idle
-  - `Thread.Sleep()`: Low CPU usage but poor performance (1.4-5x slower)
+- **Not recommended for production** due to poor performance (1.3-1.7x slower than Blocking/Poller)
+- Thread.Sleep(1ms) adds latency overhead
 - Only consider NonBlocking if you must integrate with an existing polling loop where you cannot use Blocking or Poller
 
 **Performance Characteristics**:
@@ -192,36 +192,47 @@ When choosing a receive mode, consider:
 
 **MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. Provides zero-copy semantics but requires careful lifecycle management.
 
+### Understanding Memory Benchmark Metrics
+
+In addition to the [standard benchmark metrics](#understanding-benchmark-metrics), memory strategy benchmarks include:
+
+| Column | Description |
+|--------|-------------|
+| **Gen0** | Number of Generation 0 garbage collections during the benchmark (lower is better) |
+| **Gen1** | Number of Generation 1 garbage collections (only appears for large allocations) |
+
+**GC Impact**: Higher Gen0/Gen1 values indicate more GC pressure, which can cause performance degradation and unpredictable latency spikes. A dash (-) means zero collections occurred.
+
 ### Performance Results
 
 All tests use Poller mode for reception.
 
 #### 64-Byte Messages
 
-| Strategy | Mean | Latency | Messages/sec | Gen0 | Allocated | Ratio |
-|----------|------|---------|--------------|------|-----------|-------|
-| **ArrayPool** | 2.595 ms | 259.53 ns | 3.85M | - | 1.07 KB | 0.98x |
-| **ByteArray** | 2.638 ms | 263.76 ns | 3.79M | 3.91 | 1719.07 KB | 1.00x |
-| **Message** | 5.364 ms | 536.41 ns | 1.86M | - | 625.32 KB | 2.03x |
-| **MessageZeroCopy** | 6.428 ms | 642.82 ns | 1.56M | - | 625.32 KB | 2.44x |
+| Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
+|----------|------|---------|--------------|-----------------|------|-----------|-------|
+| **ByteArray** | 3.253 ms | 325.28 ns | 3.07M | 1.57 Gbps | 3.91 | 1719.07 KB | 1.00x |
+| **ArrayPool** | 3.354 ms | 335.44 ns | 2.98M | 1.53 Gbps | - | 1.07 KB | 1.03x |
+| **Message** | 5.614 ms | 561.37 ns | 1.78M | 0.91 Gbps | - | 625.32 KB | 1.73x |
+| **MessageZeroCopy** | 6.538 ms | 653.79 ns | 1.53M | 0.78 Gbps | - | 625.32 KB | 2.01x |
 
 #### 1500-Byte Messages
 
-| Strategy | Mean | Latency | Messages/sec | Gen0 | Allocated | Ratio |
-|----------|------|---------|--------------|------|-----------|-------|
-| **Message** | 11.287 ms | 1.13 μs | 886.00K | - | 625.32 KB | 0.98x |
-| **ByteArray** | 11.495 ms | 1.15 μs | 869.97K | 78.13 | 29844.07 KB | 1.00x |
-| **ArrayPool** | 11.929 ms | 1.19 μs | 838.30K | - | 3.01 KB | 1.04x |
-| **MessageZeroCopy** | 14.504 ms | 1.45 μs | 689.46K | - | 625.32 KB | 1.26x |
+| Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
+|----------|------|---------|--------------|-----------------|------|-----------|-------|
+| **Message** | 10.993 ms | 1.10 μs | 909.64K | 10.92 Gbps | - | 625.32 KB | 1.00x |
+| **ByteArray** | 11.002 ms | 1.10 μs | 908.96K | 10.91 Gbps | 78.13 | 29844.07 KB | 1.00x |
+| **ArrayPool** | 11.286 ms | 1.13 μs | 886.05K | 10.63 Gbps | - | 3.01 KB | 1.03x |
+| **MessageZeroCopy** | 14.175 ms | 1.42 μs | 705.46K | 8.47 Gbps | - | 625.32 KB | 1.29x |
 
 #### 65KB Messages
 
-| Strategy | Mean | Latency | Messages/sec | Gen0 | Gen1 | Allocated | Ratio |
-|----------|------|---------|--------------|------|------|-----------|-------|
-| **MessageZeroCopy** | 134.626 ms | 13.46 μs | 74.28K | - | - | 625.49 KB | 0.90x |
-| **Message** | 142.068 ms | 14.21 μs | 70.39K | - | - | 625.49 KB | 0.95x |
-| **ArrayPool** | 148.562 ms | 14.86 μs | 67.31K | - | - | 65.21 KB | 0.99x |
-| **ByteArray** | 150.055 ms | 15.01 μs | 66.64K | 3250 | 250 | 1280469.24 KB | 1.00x |
+| Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Allocated | Ratio |
+|----------|------|---------|--------------|-----------------|------|------|-----------|-------|
+| **MessageZeroCopy** | 130.540 ms | 13.05 μs | 76.60K | 4.68 GB/s | - | - | 625.49 KB | 0.83x |
+| **Message** | 131.940 ms | 13.19 μs | 75.79K | 4.63 GB/s | - | - | 625.49 KB | 0.84x |
+| **ArrayPool** | 144.879 ms | 14.49 μs | 69.02K | 4.21 GB/s | - | - | 65.21 KB | 0.92x |
+| **ByteArray** | 157.312 ms | 15.73 μs | 63.57K | 3.88 GB/s | 3333.33 | 250 | 1280469.3 KB | 1.00x |
 
 ### Performance and GC Analysis
 

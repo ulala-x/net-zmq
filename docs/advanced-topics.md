@@ -319,13 +319,13 @@ Control message queuing with high water marks:
 using var socket = new Socket(context, SocketType.Pub);
 
 // Set send high water mark (default: 1000)
-socket.SetOption(SocketOption.SendHwm, 10000);
+socket.SetOption(SocketOption.Sndhwm, 10000);
 
 // Set receive high water mark
-socket.SetOption(SocketOption.RcvHwm, 10000);
+socket.SetOption(SocketOption.Rcvhwm, 10000);
 
 // For low-latency, use smaller HWM
-socket.SetOption(SocketOption.SendHwm, 100);
+socket.SetOption(SocketOption.Sndhwm, 100);
 ```
 
 **Impact**:
