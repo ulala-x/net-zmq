@@ -155,6 +155,130 @@ public class ReceiveModeBenchmarks
     }
 
     /// <summary>
+    /// Non-blocking receive mode with Thread.Sleep(1ms) fallback.
+    /// Tests whether reducing sleep time from 10ms to 1ms improves performance.
+    /// </summary>
+    [Benchmark]
+    public void NonBlocking_Sleep1_RouterToRouter()
+    {
+        var recvThread = new Thread(() =>
+        {
+            int n = 0;
+            while (n < MessageCount)
+            {
+                if (_router2.TryRecv(_identityBuffer, out _))
+                {
+                    _router2.TryRecv(_recvBuffer, out _);
+                    n++;
+                    // Batch receive without sleep
+                    while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                    {
+                        _router2.TryRecv(_recvBuffer, out _);
+                        n++;
+                    }
+                }
+                else
+                {
+                    Thread.Sleep(1);  // Wait before retry
+                }
+            }
+        });
+        recvThread.Start();
+
+        // Sender
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+            _router1.Send(_sendData, SendFlags.DontWait);
+        }
+
+        recvThread.Join();
+    }
+
+    /// <summary>
+    /// Non-blocking receive mode with Thread.Sleep(5ms) fallback.
+    /// Tests whether reducing sleep time from 10ms to 5ms improves performance.
+    /// </summary>
+    [Benchmark]
+    public void NonBlocking_Sleep5_RouterToRouter()
+    {
+        var recvThread = new Thread(() =>
+        {
+            int n = 0;
+            while (n < MessageCount)
+            {
+                if (_router2.TryRecv(_identityBuffer, out _))
+                {
+                    _router2.TryRecv(_recvBuffer, out _);
+                    n++;
+                    // Batch receive without sleep
+                    while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                    {
+                        _router2.TryRecv(_recvBuffer, out _);
+                        n++;
+                    }
+                }
+                else
+                {
+                    Thread.Sleep(5);  // Wait before retry
+                }
+            }
+        });
+        recvThread.Start();
+
+        // Sender
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+            _router1.Send(_sendData, SendFlags.DontWait);
+        }
+
+        recvThread.Join();
+    }
+
+    /// <summary>
+    /// Non-blocking receive mode with Thread.Yield() fallback.
+    /// Tests whether Thread.Yield() (cooperative yield to other threads) performs better than Thread.Sleep().
+    /// Yield gives up the CPU but allows immediate re-scheduling, unlike Sleep which waits for a minimum time.
+    /// </summary>
+    [Benchmark]
+    public void NonBlocking_Yield_RouterToRouter()
+    {
+        var recvThread = new Thread(() =>
+        {
+            int n = 0;
+            while (n < MessageCount)
+            {
+                if (_router2.TryRecv(_identityBuffer, out _))
+                {
+                    _router2.TryRecv(_recvBuffer, out _);
+                    n++;
+                    // Batch receive without sleep
+                    while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                    {
+                        _router2.TryRecv(_recvBuffer, out _);
+                        n++;
+                    }
+                }
+                else
+                {
+                    Thread.Yield();  // Wait before retry
+                }
+            }
+        });
+        recvThread.Start();
+
+        // Sender
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+            _router1.Send(_sendData, SendFlags.DontWait);
+        }
+
+        recvThread.Join();
+    }
+
+    /// <summary>
     /// Poller-based receive mode - event-driven approach using zmq_poll().
     /// Achieves 98-99% of Blocking performance with multi-socket support.
     /// Recommended for production use.

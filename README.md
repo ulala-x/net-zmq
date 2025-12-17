@@ -207,7 +207,7 @@ Performance characteristics vary based on message size, receive mode, and memory
 
 **Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-For detailed benchmark results, performance analysis, and selection guidance, see [BENCHMARKS.md](BENCHMARKS.md).
+For detailed benchmark results, performance analysis, and selection guidance, see [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Supported Platforms
 

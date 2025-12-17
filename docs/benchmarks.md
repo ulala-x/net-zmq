@@ -35,11 +35,74 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 
 ### How Each Mode Works
 
-**Blocking Mode (`socket.Recv()`)**: The calling thread blocks until a message arrives. This is the simplest approach and provides deterministic waiting with minimal CPU usage. The thread yields to the OS scheduler while waiting.
+#### Blocking Mode - I/O Blocking Pattern
 
-**NonBlocking Mode (`socket.TryRecv()`)**: Polling-based reception where the application repeatedly calls `TryRecv()` and sleeps for 10ms if no message is available. This approach prevents thread blocking but introduces latency due to the sleep interval.
+**API**: `socket.Recv()`
 
-**Poller Mode**: Event-driven reception using `zmq_poll()`. The application waits for socket events without busy-waiting. This mode supports monitoring multiple sockets simultaneously and provides efficient CPU usage while maintaining responsiveness.
+**Internal Mechanism**:
+1. Calls `recv()` syscall, transitioning from user space to kernel space
+2. Thread enters sleep state in kernel's wait queue
+3. When data arrives → network hardware triggers interrupt
+4. Kernel moves thread to ready queue
+5. Scheduler wakes thread and execution resumes
+
+**Characteristics**:
+- Simplest implementation with deterministic waiting
+- **CPU usage: 0% while waiting** (thread is asleep in kernel)
+- Kernel efficiently wakes thread exactly when needed
+- One thread per socket required
+
+#### Poller Mode - Reactor Pattern (I/O Multiplexing)
+
+**API**: `zmq_poll()`
+
+**Internal Mechanism**:
+1. Calls `zmq_poll(sockets, timeout)` which internally uses OS multiplexing APIs:
+   - Linux: `epoll_wait()`
+   - BSD/macOS: `kqueue()`
+   - Windows: `select()` or IOCP
+2. Kernel monitors multiple sockets simultaneously
+3. Any socket event → kernel immediately returns control
+4. Indicates which sockets have events ready
+
+**Characteristics**:
+- Event-driven architecture monitoring multiple sockets with single thread
+- **CPU usage: 0% while waiting** (kernel-level blocking)
+- Kernel uses hardware interrupts to detect events efficiently
+- Slightly more memory overhead for polling infrastructure
+
+#### NonBlocking Mode - Polling Pattern (Busy-waiting)
+
+**API**: `socket.TryRecv()`
+
+**Internal Mechanism**:
+1. Repeated loop in user space
+2. `TryRecv()` checks for messages (internally returns `EAGAIN`/`EWOULDBLOCK` if none available)
+3. Returns immediately with `false` if no message
+4. User code decides: `Thread.Sleep()` (adds latency) or `Thread.Yield()` (wastes CPU)
+5. Loop continues without kernel assistance
+
+**Characteristics**:
+- **No kernel-level waiting** - all polling happens in user space
+- Fundamental trade-off: CPU efficiency vs performance
+  - `Thread.Yield()`: High CPU usage (~100% when idle) but better performance
+  - `Thread.Sleep()`: Low CPU usage but poor performance (1.4-5x slower)
+- **Not recommended for production** due to inherent inefficiency
+
+#### Why Blocking and Poller Are Efficient
+
+| Mode | Waiting Location | Wake Mechanism | CPU (Idle) | Efficiency |
+|------|-----------------|----------------|------------|------------|
+| **Blocking** | Kernel space | Kernel interrupt | 0% | ✓ Optimal for single socket |
+| **Poller** | Kernel space | Kernel (epoll/kqueue) | 0% | ✓ Optimal for multiple sockets |
+| **NonBlocking** | User space | None (continuous polling) | ~100% (Yield) or Low (Sleep) | ✗ Inefficient trade-off |
+
+**Key Insight**: Blocking and Poller delegate waiting to the kernel, which:
+- Uses hardware interrupts to detect data arrival instantly
+- Keeps threads asleep (0% CPU) until events occur
+- Wakes threads at the exact moment needed
+
+NonBlocking lacks this kernel support, forcing continuous checking in user space, resulting in either wasted CPU cycles (Yield) or added latency (Sleep).
 
 ### Performance Results
 
@@ -51,54 +114,71 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 |------|------|---------|------------|-----------|-------|
 | **Blocking** | 2.325 ms | 232.52 ns | 4.30M/sec | 203 B | 1.00x |
 | **Poller** | 2.376 ms | 237.59 ns | 4.21M/sec | 323 B | 1.02x |
-| **NonBlocking** | 11.447 ms | 1.14 μs | 873.62K/sec | 212 B | 4.92x |
+| NonBlocking (Yield) | 2.643 ms | 264.29 ns | 3.78M/sec | 203 B | 1.14x |
+| NonBlocking (Sleep 1ms) | 3.318 ms | 331.84 ns | 3.01M/sec | 203 B | 1.43x |
+| NonBlocking (Sleep 5ms) | 6.363 ms | 636.28 ns | 1.57M/sec | 206 B | 2.74x |
+| NonBlocking (Sleep 10ms) | 11.386 ms | 1.14 μs | 878.28K/sec | 212 B | 4.90x |
 
 #### 1500-Byte Messages
 
 | Mode | Mean | Latency | Throughput | Allocated | Ratio |
 |------|------|---------|------------|-----------|-------|
+| NonBlocking (Yield) | 10.461 ms | 1.05 μs | 955.92K/sec | 212 B | 0.95x |
 | **Poller** | 10.552 ms | 1.06 μs | 947.66K/sec | 332 B | 0.96x |
 | **Blocking** | 11.040 ms | 1.10 μs | 905.79K/sec | 212 B | 1.00x |
-| **NonBlocking** | 14.909 ms | 1.49 μs | 670.72K/sec | 212 B | 1.35x |
+| NonBlocking (Sleep 1ms) | 13.346 ms | 1.33 μs | 749.26K/sec | 212 B | 1.21x |
+| NonBlocking (Sleep 5ms) | 14.931 ms | 1.49 μs | 669.73K/sec | 212 B | 1.35x |
+| NonBlocking (Sleep 10ms) | 15.141 ms | 1.51 μs | 660.45K/sec | 212 B | 1.37x |
 
 #### 65KB Messages
 
 | Mode | Mean | Latency | Throughput | Allocated | Ratio |
 |------|------|---------|------------|-----------|-------|
+| NonBlocking (Yield) | 140.122 ms | 14.01 μs | 71.37K/sec | 384 B | 0.83x |
 | **Poller** | 167.479 ms | 16.75 μs | 59.71K/sec | 504 B | 0.99x |
 | **Blocking** | 168.915 ms | 16.89 μs | 59.20K/sec | 384 B | 1.00x |
-| **NonBlocking** | 351.448 ms | 35.14 μs | 28.45K/sec | 445 B | 2.08x |
+| NonBlocking (Sleep 10ms) | 202.023 ms | 20.20 μs | 49.50K/sec | 445 B | 1.20x |
+| NonBlocking (Sleep 5ms) | 264.741 ms | 26.47 μs | 37.77K/sec | 568 B | 1.57x |
+| NonBlocking (Sleep 1ms) | 279.412 ms | 27.94 μs | 35.79K/sec | 568 B | 1.65x |
 
 ### Performance Analysis
 
-**Blocking vs Poller**: Performance is nearly identical across all message sizes (96-102% relative performance). Poller allocates slightly more memory (323-504 bytes vs 203-384 bytes for 10K messages) due to polling infrastructure, but the difference is negligible in practice.
+**Blocking vs Poller**: Performance is nearly identical across all message sizes (96-102% relative performance). Both modes use kernel-level waiting mechanisms that efficiently wake threads when messages arrive. Poller allocates slightly more memory (323-504 bytes vs 203-384 bytes for 10K messages) due to polling infrastructure, but the difference is negligible in practice.
 
-**NonBlocking Performance**: NonBlocking mode shows 1.35-4.92x slower performance compared to Blocking. This difference stems from the `Thread.Sleep(10ms)` call when no message is immediately available, which adds latency to each receive operation. The performance gap is most pronounced with small messages (64B) where the sleep overhead dominates total processing time.
+**NonBlocking Performance and Trade-offs**: NonBlocking mode faces a fundamental trade-off between CPU usage and performance:
 
-**Latency Characteristics**: Blocking and Poller modes achieve sub-microsecond latency for small messages (232-238ns), while NonBlocking incurs microsecond-level latency due to polling overhead.
+- **Thread.Yield()**: Achieves the best NonBlocking performance (1.14x slower than Blocking for 64B) but causes CPU busy-waiting. When no messages are available, the thread continuously polls and yields, resulting in high CPU usage (potentially 100%).
+- **Thread.Sleep(1ms)**: Reduces CPU usage but adds latency (1.43x slower than Blocking for 64B).
+- **Thread.Sleep(5-10ms)**: Further reduces CPU usage but significantly degrades performance (2.74-4.90x slower than Blocking for 64B).
+
+**Why NonBlocking is Slower**: Even with `Thread.Yield()`, NonBlocking remains slower than Blocking because:
+1. User-space polling with `TryRecv()` has overhead compared to kernel-level blocking
+2. Thread scheduling overhead from repeated yielding
+3. Blocking and Poller modes use efficient kernel mechanisms (`recv()` syscall and `zmq_poll()`) that wake threads immediately when messages arrive
+
+**Message Size Impact**: The Sleep overhead is most pronounced with small messages (64B) where processing is fast. With large messages (65KB), NonBlocking with Yield can match or exceed Blocking performance (0.83x) because message processing time dominates over polling overhead.
+
+**Recommendation**: NonBlocking mode is not recommended for production use due to the CPU usage vs performance trade-off. Use Blocking for single-socket applications or Poller for multi-socket scenarios.
 
 ### Receive Mode Selection Considerations
 
 When choosing a receive mode, consider:
 
-**Single Socket Applications**:
-- Blocking mode offers simple implementation and excellent performance when thread blocking is acceptable
-- Poller mode provides similar performance with event-driven architecture
-- NonBlocking mode may be suitable when integrating with existing polling loops
+**Recommended Approaches**:
+- **Single Socket**: Use **Blocking** mode for simplicity and best performance
+- **Multiple Sockets**: Use **Poller** mode to monitor multiple sockets with a single thread
+- Both modes provide optimal CPU efficiency (0% when idle) and low latency
 
-**Multiple Socket Applications**:
-- Poller mode enables monitoring multiple sockets with a single thread
-- Blocking mode would require one thread per socket
-- NonBlocking mode could service multiple sockets but with higher latency
+**NonBlocking Mode Limitations**:
+- **Not recommended for production** due to fundamental trade-offs:
+  - `Thread.Yield()`: Good performance but 100% CPU usage when idle
+  - `Thread.Sleep()`: Low CPU usage but poor performance (1.4-5x slower)
+- Only consider NonBlocking if you must integrate with an existing polling loop where you cannot use Blocking or Poller
 
-**Latency Requirements**:
-- Blocking and Poller modes deliver similar latency (within 2-3%)
-- NonBlocking mode adds 10ms+ latency per receive operation due to sleep intervals
-
-**Thread Management**:
-- Blocking mode dedicates a thread to each socket
-- Poller mode allows one thread to service multiple sockets
-- NonBlocking mode enables integration with application event loops
+**Performance Characteristics**:
+- Blocking and Poller deliver similar performance (within 2-3% for small messages)
+- Both use kernel-level waiting that wakes threads immediately when messages arrive
+- NonBlocking uses user-space polling which is inherently less efficient
 
 ## Memory Strategy Benchmarks
 
