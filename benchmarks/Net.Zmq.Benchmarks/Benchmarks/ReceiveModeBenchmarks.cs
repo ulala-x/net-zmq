@@ -200,7 +200,6 @@ public class ReceiveModeBenchmarks
                 // Batch receive all available messages
                 while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
                 {
-                    _router2.TryRecv(_recvBuffer, out _);
                     n++;
                 }
             }
