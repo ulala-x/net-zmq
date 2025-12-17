@@ -87,18 +87,31 @@ public class ReceiveModeBenchmarks
 
     /// <summary>
     /// Blocking receive mode - highest performance, simplest implementation.
-    /// Receiver thread blocks on Recv() until messages are available.
+    /// Uses blocking Recv() for first message, then batch-processes available messages
+    /// with TryRecv() to minimize syscall overhead.
     /// </summary>
     [Benchmark(Baseline = true)]
     public void Blocking_RouterToRouter()
     {
+        var countdown = new CountdownEvent(1);
         var recvThread = new Thread(() =>
         {
-            for (int i = 0; i < MessageCount; i++)
+            int n = 0;
+            while (n < MessageCount)
             {
-                _router2.Recv(_identityBuffer);  // Identity frame
-                _router2.Recv(_recvBuffer);       // Body frame
+                // First message: blocking wait (maintains Blocking semantics)
+                _router2.Recv(_identityBuffer);
+                _router2.Recv(_recvBuffer);
+                n++;
+
+                // Batch receive available messages (reduces syscalls)
+                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                {
+                    _router2.TryRecv(_recvBuffer, out _);
+                    n++;
+                }
             }
+            countdown.Signal();
         });
         recvThread.Start();
 
@@ -109,7 +122,10 @@ public class ReceiveModeBenchmarks
             _router1.Send(_sendData, SendFlags.DontWait);
         }
 
-        recvThread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 
 
@@ -119,8 +135,9 @@ public class ReceiveModeBenchmarks
     /// Not recommended for production use.
     /// </summary>
     [Benchmark]
-    public void NonBlocking_Sleep1_RouterToRouter()
+    public void NonBlocking_RouterToRouter()
     {
+        var countdown = new CountdownEvent(1);
         var recvThread = new Thread(() =>
         {
             int n = 0;
@@ -142,6 +159,7 @@ public class ReceiveModeBenchmarks
                     Thread.Sleep(1);  // Wait before retry
                 }
             }
+            countdown.Signal();  // Signal completion
         });
         recvThread.Start();
 
@@ -152,7 +170,10 @@ public class ReceiveModeBenchmarks
             _router1.Send(_sendData, SendFlags.DontWait);
         }
 
-        recvThread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 
 
@@ -165,6 +186,7 @@ public class ReceiveModeBenchmarks
     [Benchmark]
     public void Poller_RouterToRouter()
     {
+        var countdown = new CountdownEvent(1);
         var recvThread = new Thread(() =>
         {
             using var poller = new Poller(1);
@@ -182,6 +204,7 @@ public class ReceiveModeBenchmarks
                     n++;
                 }
             }
+            countdown.Signal();  // Signal completion
         });
         recvThread.Start();
 
@@ -192,6 +215,9 @@ public class ReceiveModeBenchmarks
             _router1.Send(_sendData, SendFlags.DontWait);
         }
 
-        recvThread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 }

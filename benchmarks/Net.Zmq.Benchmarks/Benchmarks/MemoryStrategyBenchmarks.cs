@@ -98,28 +98,39 @@ public class MemoryStrategyBenchmarks
     [Benchmark(Baseline = true)]
     public void ByteArray_SendRecv()
     {
+        var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            using var poller = new Poller(1);
-            poller.Add(_router2, PollEvents.In);
             int n = 0;
 
             while (n < MessageCount)
             {
-                poller.Poll(-1);
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+                int size = _router2.Recv(_recvBuffer);
+
+                // Simulate external delivery: create new output buffer (GC pressure!)
+                var outputBuffer = new byte[size];
+                _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
+                // External consumer would use outputBuffer here
+
+                n++;
+
+                // Batch receive available messages
                 while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
                 {
                     // Receive into fixed buffer
-                    int size = _router2.Recv(_recvBuffer);
+                    size = _router2.Recv(_recvBuffer);
 
                     // Simulate external delivery: create new output buffer (GC pressure!)
-                    var outputBuffer = new byte[size];
+                    outputBuffer = new byte[size];
                     _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
                     // External consumer would use outputBuffer here
 
                     n++;
                 }
             }
+            countdown.Signal();
         });
         thread.Start();
 
@@ -133,7 +144,10 @@ public class MemoryStrategyBenchmarks
             _router1.Send(sendBuffer, SendFlags.DontWait);
         }
 
-        thread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 
     // ========================================
@@ -147,22 +161,39 @@ public class MemoryStrategyBenchmarks
     [Benchmark]
     public void ArrayPool_SendRecv()
     {
+        var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            using var poller = new Poller(1);
-            poller.Add(_router2, PollEvents.In);
             int n = 0;
 
             while (n < MessageCount)
             {
-                poller.Poll(-1);
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+                int size = _router2.Recv(_recvBuffer);
+
+                // Simulate external delivery: rent from pool (minimal GC!)
+                var outputBuffer = ArrayPool<byte>.Shared.Rent(size);
+                try
+                {
+                    _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
+                    // External consumer would use outputBuffer[0..size] here
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(outputBuffer);
+                }
+
+                n++;
+
+                // Batch receive available messages
                 while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
                 {
                     // Receive into fixed buffer
-                    int size = _router2.Recv(_recvBuffer);
+                    size = _router2.Recv(_recvBuffer);
 
                     // Simulate external delivery: rent from pool (minimal GC!)
-                    var outputBuffer = ArrayPool<byte>.Shared.Rent(size);
+                    outputBuffer = ArrayPool<byte>.Shared.Rent(size);
                     try
                     {
                         _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
@@ -176,6 +207,7 @@ public class MemoryStrategyBenchmarks
                     n++;
                 }
             }
+            countdown.Signal();
         });
         thread.Start();
 
@@ -196,7 +228,10 @@ public class MemoryStrategyBenchmarks
             }
         }
 
-        thread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 
     // ========================================
@@ -210,15 +245,25 @@ public class MemoryStrategyBenchmarks
     [Benchmark]
     public void Message_SendRecv()
     {
+        var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            using var poller = new Poller(1);
-            poller.Add(_router2, PollEvents.In);
             int n = 0;
 
             while (n < MessageCount)
             {
-                poller.Poll(-1);
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+                using (var msg = new Message())
+                {
+                    _router2.Recv(msg);
+                    // Use msg.Data directly (no copy to managed memory)
+                    // External consumer would use msg.Data here
+                }
+
+                n++;
+
+                // Batch receive available messages
                 while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
                 {
                     // Receive into Message (native memory allocation)
@@ -230,6 +275,7 @@ public class MemoryStrategyBenchmarks
                     n++;
                 }
             }
+            countdown.Signal();
         });
         thread.Start();
 
@@ -242,7 +288,10 @@ public class MemoryStrategyBenchmarks
             _router1.Send(msg, SendFlags.DontWait);
         }
 
-        thread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 
     // ========================================
@@ -256,15 +305,25 @@ public class MemoryStrategyBenchmarks
     [Benchmark]
     public void MessageZeroCopy_SendRecv()
     {
+        var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            using var poller = new Poller(1);
-            poller.Add(_router2, PollEvents.In);
             int n = 0;
 
             while (n < MessageCount)
             {
-                poller.Poll(-1);
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+                using (var msg = new Message())
+                {
+                    _router2.Recv(msg);
+                    // Use msg.Data directly (no copy to managed memory)
+                    // External consumer would use msg.Data here
+                }
+
+                n++;
+
+                // Batch receive available messages
                 while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
                 {
                     // Receive into Message (already zero-copy from ZMQ side)
@@ -276,6 +335,7 @@ public class MemoryStrategyBenchmarks
                     n++;
                 }
             }
+            countdown.Signal();
         });
         thread.Start();
 
@@ -304,6 +364,9 @@ public class MemoryStrategyBenchmarks
             _router1.Send(msg, SendFlags.DontWait);
         }
 
-        thread.Join();
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
     }
 }
