@@ -302,7 +302,7 @@ public class MemoryStrategyBenchmarks
         {
             _router1.Send(_router2Id, SendFlags.SendMore);
 
-            using var msg = new Message(_sourceData.AsSpan(0, MessageSize));
+            using var msg = new Message(_sourceData.AsSpan(0, (int)MessageSize));
             _router1.Send(msg, SendFlags.DontWait);
         }
 
@@ -363,17 +363,17 @@ public class MemoryStrategyBenchmarks
             _router1.Send(_router2Id, SendFlags.SendMore);
 
             // Allocate native memory
-            nint nativePtr = Marshal.AllocHGlobal(MessageSize);
+            nint nativePtr = Marshal.AllocHGlobal((int)MessageSize);
 
             // Copy source data to native memory
             unsafe
             {
-                var nativeSpan = new Span<byte>((void*)nativePtr, MessageSize);
-                _sourceData.AsSpan(0, MessageSize).CopyTo(nativeSpan);
+                var nativeSpan = new Span<byte>((void*)nativePtr, (int)MessageSize);
+                _sourceData.AsSpan(0, (int)MessageSize).CopyTo(nativeSpan);
             }
 
             // Create Message with zero-copy (ZMQ will own this memory)
-            using var msg = new Message(nativePtr, MessageSize, ptr =>
+            using var msg = new Message(nativePtr, (int)MessageSize, ptr =>
             {
                 // Free callback - called when ZMQ is done with the message
                 Marshal.FreeHGlobal(ptr);
@@ -439,7 +439,7 @@ public class MemoryStrategyBenchmarks
             _router1.Send(_router2Id, SendFlags.SendMore);
 
             // Rent from MessagePool (automatically returned via ZMQ free callback after transmission)
-            using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, MessageSize));
+            using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, (int)MessageSize));
             _router1.Send(msg, SendFlags.DontWait);
 
         }
