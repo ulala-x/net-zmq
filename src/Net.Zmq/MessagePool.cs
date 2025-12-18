@@ -1,7 +1,54 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Net.Zmq;
+
+/// <summary>
+/// Predefined message sizes for MessagePool operations.
+/// All sizes are powers of 2 from 16 bytes to 4 MB.
+/// </summary>
+public enum MessageSize
+{
+    /// <summary>16 bytes</summary>
+    B16 = 16,
+    /// <summary>32 bytes</summary>
+    B32 = 32,
+    /// <summary>64 bytes</summary>
+    B64 = 64,
+    /// <summary>128 bytes</summary>
+    B128 = 128,
+    /// <summary>256 bytes</summary>
+    B256 = 256,
+    /// <summary>512 bytes</summary>
+    B512 = 512,
+    /// <summary>1 KB (1024 bytes)</summary>
+    K1 = 1024,
+    /// <summary>2 KB (2048 bytes)</summary>
+    K2 = 2048,
+    /// <summary>4 KB (4096 bytes)</summary>
+    K4 = 4096,
+    /// <summary>8 KB (8192 bytes)</summary>
+    K8 = 8192,
+    /// <summary>16 KB (16384 bytes)</summary>
+    K16 = 16384,
+    /// <summary>32 KB (32768 bytes)</summary>
+    K32 = 32768,
+    /// <summary>64 KB (65536 bytes)</summary>
+    K64 = 65536,
+    /// <summary>128 KB (131072 bytes)</summary>
+    K128 = 131072,
+    /// <summary>256 KB (262144 bytes)</summary>
+    K256 = 262144,
+    /// <summary>512 KB (524288 bytes)</summary>
+    K512 = 524288,
+    /// <summary>1 MB (1048576 bytes)</summary>
+    M1 = 1048576,
+    /// <summary>2 MB (2097152 bytes)</summary>
+    M2 = 2097152,
+    /// <summary>4 MB (4194304 bytes)</summary>
+    M4 = 4194304
+}
 
 /// <summary>
 /// Pool of native memory buffers for zero-copy Message creation.
@@ -10,18 +57,33 @@ namespace Net.Zmq;
 /// </summary>
 public sealed class MessagePool
 {
-    // Bucket sizes: powers of 2 + common sizes like MTU (1500)
+    // Bucket sizes: powers of 2 from 16 bytes to 4 MB
     // IMPORTANT: Must be declared before Shared to ensure proper initialization order
     private static readonly int[] BucketSizes = new[]
     {
-        16, 32, 64, 128, 256, 512, 1024,
-        1500, // MTU size
-        2048, 4096, 8192, 16384, 32768, 65536,
-        131072, 262144, 524288, 1048576
+        16,       // 16 B
+        32,       // 32 B
+        64,       // 64 B
+        128,      // 128 B
+        256,      // 256 B
+        512,      // 512 B
+        1024,     // 1 KB
+        2048,     // 2 KB
+        4096,     // 4 KB
+        8192,     // 8 KB
+        16384,    // 16 KB
+        32768,    // 32 KB
+        65536,    // 64 KB
+        131072,   // 128 KB
+        262144,   // 256 KB
+        524288,   // 512 KB
+        1048576,  // 1 MB
+        2097152,  // 2 MB
+        4194304   // 4 MB
     };
 
     private const int MaxBuffersPerBucket = 500;
-    private const int MaxPoolableSize = 1048576; // 1MB
+    private const int MaxPoolableSize = 4194304; // 4MB
 
     /// <summary>
     /// Shared singleton instance of MessagePool.
@@ -181,6 +243,26 @@ public sealed class MessagePool
             PoolMisses = Volatile.Read(ref _poolMisses),
             OutstandingBuffers = Volatile.Read(ref _totalRents) - Volatile.Read(ref _totalReturns)
         };
+    }
+
+    /// <summary>
+    /// Pre-warms the pool by allocating buffers for a specific message size.
+    /// </summary>
+    /// <param name="size">Message size to pre-warm.</param>
+    /// <param name="count">Number of buffers to allocate.</param>
+    public void Prewarm(MessageSize size, int count)
+    {
+        Prewarm(new[] { (int)size }, count);
+    }
+
+    /// <summary>
+    /// Pre-warms the pool by allocating buffers for multiple message sizes.
+    /// </summary>
+    /// <param name="sizes">Message sizes to pre-warm.</param>
+    /// <param name="count">Number of buffers to allocate per size.</param>
+    public void Prewarm(MessageSize[] sizes, int count)
+    {
+        Prewarm(sizes.Select(s => (int)s).ToArray(), count);
     }
 
     /// <summary>

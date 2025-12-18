@@ -441,6 +441,7 @@ public class MemoryStrategyBenchmarks
             // Rent from MessagePool (automatically returned on disposal)
             using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, MessageSize));
             _router1.Send(msg, SendFlags.DontWait);
+
         }
 
         if (!countdown.Wait(TimeSpan.FromSeconds(30)))
