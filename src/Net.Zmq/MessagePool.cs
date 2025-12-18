@@ -82,7 +82,31 @@ public sealed class MessagePool
         4194304   // 4 MB
     ];
 
-    private const int MaxBuffersPerBucket = 500;
+    // Max buffers per bucket: smaller buffers = more count, larger buffers = fewer count
+    // Rationale: Small buffers are cheap (16B-512B), large buffers are expensive (1MB-4MB)
+    private static readonly int[] MaxBuffersPerBucket =
+    [
+        1000,  // 16 B   - very cheap, high count
+        1000,  // 32 B   - very cheap, high count
+        1000,  // 64 B   - very cheap, high count
+        1000,  // 128 B  - very cheap, high count
+        1000,  // 256 B  - cheap, high count
+        1000,  // 512 B  - cheap, high count
+        500,   // 1 KB   - moderate, medium count
+        500,   // 2 KB   - moderate, medium count
+        500,   // 4 KB   - moderate, medium count
+        250,   // 8 KB   - medium cost
+        250,   // 16 KB  - medium cost
+        250,   // 32 KB  - medium cost
+        250,   // 64 KB  - medium cost
+        100,   // 128 KB - expensive, low count
+        100,   // 256 KB - expensive, low count
+        100,   // 512 KB - expensive, low count
+        50,    // 1 MB   - very expensive, very low count
+        50,    // 2 MB   - very expensive, very low count
+        50     // 4 MB   - very expensive, very low count
+    ];
+
     private const int MaxPoolableSize = 4194304; // 4MB
 
     /// <summary>
@@ -244,7 +268,7 @@ public sealed class MessagePool
 
         // Check if bucket is full
         int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
-        if (currentCount >= MaxBuffersPerBucket)
+        if (currentCount >= MaxBuffersPerBucket[bucketIndex])
         {
             // Pool is full: free the buffer
             Marshal.FreeHGlobal(pointer);
@@ -309,7 +333,7 @@ public sealed class MessagePool
 
             int bucketSize = BucketSizes[bucketIndex];
             int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
-            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket - currentCount);
+            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - currentCount);
 
             for (int i = 0; i < toAllocate; i++)
             {
@@ -334,6 +358,49 @@ public sealed class MessagePool
                 Interlocked.Decrement(ref _bucketCounts[i]);
             }
         }
+    }
+
+    /// <summary>
+    /// Sets the maximum number of buffers for a specific bucket size.
+    /// This allows runtime configuration of pool limits per size.
+    /// </summary>
+    /// <param name="size">The message size to configure.</param>
+    /// <param name="maxBuffers">Maximum number of buffers to pool for this size. Must be positive.</param>
+    /// <exception cref="ArgumentException">If size is not poolable or maxBuffers is not positive.</exception>
+    /// <example>
+    /// <code>
+    /// // Increase buffer count for 1KB messages to 1000
+    /// MessagePool.Shared.SetMaxBuffers(MessageSize.K1, 1000);
+    ///
+    /// // Reduce buffer count for 4MB messages to 25
+    /// MessagePool.Shared.SetMaxBuffers(MessageSize.M4, 25);
+    /// </code>
+    /// </example>
+    public void SetMaxBuffers(MessageSize size, int maxBuffers)
+    {
+        if (maxBuffers <= 0)
+            throw new ArgumentException("maxBuffers must be positive", nameof(maxBuffers));
+
+        int bucketIndex = SelectBucket((int)size);
+        if (bucketIndex == -1)
+            throw new ArgumentException($"Size {size} ({(int)size} bytes) is not poolable (max: {MaxPoolableSize} bytes)", nameof(size));
+
+        MaxBuffersPerBucket[bucketIndex] = maxBuffers;
+    }
+
+    /// <summary>
+    /// Gets the current maximum number of buffers for a specific bucket size.
+    /// </summary>
+    /// <param name="size">The message size to query.</param>
+    /// <returns>Maximum number of buffers for this size.</returns>
+    /// <exception cref="ArgumentException">If size is not poolable.</exception>
+    public int GetMaxBuffers(MessageSize size)
+    {
+        int bucketIndex = SelectBucket((int)size);
+        if (bucketIndex == -1)
+            throw new ArgumentException($"Size {size} ({(int)size} bytes) is not poolable (max: {MaxPoolableSize} bytes)", nameof(size));
+
+        return MaxBuffersPerBucket[bucketIndex];
     }
 }
 
