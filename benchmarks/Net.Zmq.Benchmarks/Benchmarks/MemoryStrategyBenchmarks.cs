@@ -71,7 +71,8 @@ public class MemoryStrategyBenchmarks
 
         // Pre-warm MessagePool with buffers for this message size
         // Allocate 400 buffers to ensure 100% hit rate during benchmark
-        MessagePool.Shared.Prewarm(new[] { MessageSize }, 400);
+        MessagePool.Shared.SetMaxBuffers(MessageSize,800);
+        MessagePool.Shared.Prewarm(MessageSize, 800);
         Console.WriteLine($"Pre-warmed MessagePool with 400 buffers of size {MessageSize}");
     }
 
@@ -135,7 +136,7 @@ public class MemoryStrategyBenchmarks
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into fixed buffer
                     size = _router2.Recv(_recvBuffer);
@@ -205,7 +206,7 @@ public class MemoryStrategyBenchmarks
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into fixed buffer
                     size = _router2.Recv(_recvBuffer);
@@ -282,7 +283,7 @@ public class MemoryStrategyBenchmarks
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into Message (native memory allocation)
                     using var msg = new Message();
@@ -342,7 +343,7 @@ public class MemoryStrategyBenchmarks
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into Message (already zero-copy from ZMQ side)
                     using var msg = new Message();
@@ -418,7 +419,7 @@ public class MemoryStrategyBenchmarks
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into Message (already zero-copy from ZMQ side)
                     using var msg = new Message();
@@ -472,31 +473,20 @@ public class MemoryStrategyBenchmarks
                 // First message: blocking wait
                 _router2.Recv(_identityBuffer);
 
-                // Receive: ReceiveWithPool 사용 (resend=false, 수동 반환)
-                Message msg;
-                using (msg = _router2.ReceiveWithPool(resend: false))
-                {
-                    // Use msg.Data directly (no copy to managed memory)
-                    // External consumer would use msg.Data here
-                }
-
-                // IMPORTANT: Explicitly return to pool after use
-                MessagePool.Shared.Return(msg);
+                // Receive: ReceiveWithPool 사용 (Dispose() 시 자동 반환)
+                using var msg = _router2.ReceiveWithPool();
+                // Use msg.Data here
+                // Dispose() 시 자동 반환
 
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into pooled Message
-                    using (msg = _router2.ReceiveWithPool(resend: false))
-                    {
-                        // Use msg.Data directly (no copy to managed memory)
-                        // External consumer would use msg.Data here
-                    }
-
-                    // IMPORTANT: Explicitly return to pool after use
-                    MessagePool.Shared.Return(msg);
+                    using var msg2 = _router2.ReceiveWithPool();
+                    // Use msg2.Data here
+                    // Dispose() 시 자동 반환
 
                     n++;
                 }

@@ -105,9 +105,9 @@ public class ReceiveModeBenchmarks
                 n++;
 
                 // Batch receive available messages (reduces syscalls)
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
-                    _router2.TryRecv(_recvBuffer, out _);
+                    _router2.Recv(_recvBuffer, RecvFlags.DontWait);
                     n++;
                 }
             }
@@ -143,14 +143,14 @@ public class ReceiveModeBenchmarks
             int n = 0;
             while (n < MessageCount)
             {
-                if (_router2.TryRecv(_identityBuffer, out _))
+                if (_router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
-                    _router2.TryRecv(_recvBuffer, out _);
+                    _router2.Recv(_recvBuffer, RecvFlags.DontWait);
                     n++;
                     // Batch receive without sleep
-                    while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                    while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                     {
-                        _router2.TryRecv(_recvBuffer, out _);
+                        _router2.Recv(_recvBuffer, RecvFlags.DontWait);
                         n++;
                     }
                 }
@@ -198,8 +198,9 @@ public class ReceiveModeBenchmarks
                 poller.Poll(-1);  // Wait for events
 
                 // Batch receive all available messages
-                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
+                    _router2.Recv(_recvBuffer, RecvFlags.DontWait);
                     n++;
                 }
             }

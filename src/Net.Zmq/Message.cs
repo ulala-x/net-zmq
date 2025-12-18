@@ -19,6 +19,7 @@ public sealed class Message : IDisposable
     internal nint _poolDataPtr = nint.Zero;     // 풀 반환을 위한 네이티브 포인터
     internal int _poolBucketIndex = -1;          // 풀의 버킷 인덱스
     internal int _poolActualSize = -1;           // 실제 할당된 크기
+    internal bool _isPooled = false;             // 풀에서 할당된 메시지 여부
 
     /// <summary>
     /// Initializes an empty message.
@@ -379,6 +380,13 @@ public sealed class Message : IDisposable
         }
 
         Marshal.FreeHGlobal(_msgPtr);
+
+        // 풀링된 메시지면 자동으로 풀에 반환
+        if (_isPooled && _poolDataPtr != nint.Zero)
+        {
+            MessagePool.Shared.ReturnInternal(this);
+        }
+
         GC.SuppressFinalize(this);
     }
 
@@ -394,6 +402,12 @@ public sealed class Message : IDisposable
                 LibZmq.MsgClosePtr(_msgPtr);
             }
             Marshal.FreeHGlobal(_msgPtr);
+
+            // 풀링된 메시지면 자동으로 풀에 반환
+            if (_isPooled && _poolDataPtr != nint.Zero)
+            {
+                MessagePool.Shared.ReturnInternal(this);
+            }
         }
     }
 }

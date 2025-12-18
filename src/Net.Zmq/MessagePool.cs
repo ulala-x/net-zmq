@@ -216,6 +216,7 @@ public sealed class MessagePool
         msg._poolDataPtr = nativePtr;
         msg._poolBucketIndex = bucketIndex;
         msg._poolActualSize = actualSize;
+        msg._isPooled = false;  // callback이 있으므로 수동 반환 불필요
 
         return msg;
     }
@@ -275,6 +276,7 @@ public sealed class MessagePool
         msg._poolDataPtr = nativePtr;
         msg._poolBucketIndex = bucketIndex;
         msg._poolActualSize = actualSize;
+        msg._isPooled = !withCallback;  // callback 없으면 풀 마킹
 
         return msg;
     }
@@ -383,6 +385,45 @@ public sealed class MessagePool
     }
 
     /// <summary>
+    /// Pre-warms the pool by allocating different numbers of buffers for different message sizes.
+    /// This allows fine-grained control over pre-allocation per size.
+    /// </summary>
+    /// <param name="configuration">Dictionary mapping message sizes to the number of buffers to allocate for each size.</param>
+    /// <exception cref="ArgumentNullException">If configuration is null.</exception>
+    /// <exception cref="ArgumentException">If any count value is negative.</exception>
+    /// <example>
+    /// <code>
+    /// // Pre-warm with different counts per size
+    /// MessagePool.Shared.Prewarm(new Dictionary&lt;MessageSize, int&gt;
+    /// {
+    ///     { MessageSize.B64, 1000 },    // 1000 buffers for 64-byte messages
+    ///     { MessageSize.K1, 500 },      // 500 buffers for 1KB messages
+    ///     { MessageSize.K64, 100 }      // 100 buffers for 64KB messages
+    /// });
+    /// </code>
+    /// </example>
+    public void Prewarm(Dictionary<MessageSize, int> configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        // Validate all entries first
+        foreach (var kvp in configuration)
+        {
+            if (kvp.Value < 0)
+                throw new ArgumentException($"Buffer count must be non-negative for size {kvp.Key}", nameof(configuration));
+        }
+
+        // Apply pre-warming for each size
+        foreach (var kvp in configuration)
+        {
+            if (kvp.Value > 0)
+            {
+                Prewarm([(int)kvp.Key], kvp.Value);
+            }
+        }
+    }
+
+    /// <summary>
     /// Pre-warms the pool by allocating buffers for specific message sizes.
     /// This helps avoid allocation overhead during benchmarks.
     /// </summary>
@@ -399,7 +440,7 @@ public sealed class MessagePool
 
             int bucketSize = BucketSizes[bucketIndex];
             int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
-            int toAllocate = Math.Min(countPerSize, Math.Max(0, MaxBuffersPerBucket[bucketIndex] - currentCount));
+            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - currentCount);
 
             for (int i = 0; i < toAllocate; i++)
             {
@@ -427,38 +468,26 @@ public sealed class MessagePool
     }
 
     /// <summary>
-    /// 풀링된 Message 버퍼를 수동으로 풀에 반환합니다.
-    ///
-    /// 중요: withCallback=false로 대여한 메시지에 대해서만 호출하세요.
-    /// 메시지를 전송한 경우, ZMQ가 callback을 통해 자동으로 반환합니다.
+    /// 풀링된 Message 버퍼를 내부적으로 풀에 반환합니다.
+    /// Message.Dispose()에서 자동으로 호출되므로 직접 호출할 필요가 없습니다.
     ///
     /// 이 메서드는 멱등성을 가집니다 - 여러 번 호출하거나
     /// callback을 통한 자동 반환 후에 호출해도 안전합니다
     /// (CompareExchange를 사용하여 단일 실행 보장).
     /// </summary>
     /// <param name="msg">풀에 반환할 Message</param>
-    /// <example>
-    /// <code>
-    /// // 재전송 없이 수신하는 경우
-    /// using var msg = socket.ReceiveWithPool(resend: false);
-    /// ProcessMessage(msg.Data);
-    /// msg.Dispose();
-    /// MessagePool.Shared.Return(msg);  // 필수!
-    ///
-    /// // 재전송하는 경우
-    /// using var msg = socket.ReceiveWithPool(resend: true);
-    /// otherSocket.Send(msg);  // ZMQ callback으로 자동 반환
-    /// </code>
-    /// </example>
-    public void Return(Message msg)
+    internal void ReturnInternal(Message msg)
     {
         if (msg._poolBucketIndex == -1)
             return;
 
-        if (msg._poolDataPtr == nint.Zero)
+        // 중복 반환 방지: 원자적으로 _poolDataPtr 제거
+        var dataPtr = Interlocked.Exchange(ref msg._poolDataPtr, nint.Zero);
+        if (dataPtr == nint.Zero)
             return;
 
-        Return(msg._poolDataPtr, msg._poolActualSize, msg._poolBucketIndex);
+        // 버퍼를 풀에 반환
+        Return(dataPtr, msg._poolActualSize, msg._poolBucketIndex);
     }
 
     /// <summary>

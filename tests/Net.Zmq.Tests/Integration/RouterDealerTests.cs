@@ -217,7 +217,7 @@ public class Router_Dealer_Socket
             var replyB = dealer2.RecvString();
             replyB.Should().Be("Reply to B");
 
-            dealer1.TryRecvString(out var replyA).Should().BeFalse();
+            dealer1.RecvString(RecvFlags.DontWait).Should().BeNull();
         }
 
         [Fact(DisplayName = "Should distribute messages from dealer in order received")]

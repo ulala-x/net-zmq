@@ -184,9 +184,10 @@ public static class SocketAsyncExtensions
         ArgumentNullException.ThrowIfNull(socket);
 
         // Fast path: Try non-blocking receive first
-        if (socket.TryRecvBytes(out var data))
+        var data = socket.RecvBytes(RecvFlags.DontWait);
+        if (data != null)
         {
-            return data!;
+            return data;
         }
 
         // Slow path: Poll until ready
@@ -202,7 +203,7 @@ public static class SocketAsyncExtensions
                 // Poll with short timeout to check if socket has data available
                 if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
-                    return socket.RecvBytes();
+                    return socket.RecvBytes()!;
                 }
 
                 // Small delay to avoid busy-waiting
@@ -230,9 +231,10 @@ public static class SocketAsyncExtensions
         ArgumentNullException.ThrowIfNull(socket);
 
         // Fast path: Try non-blocking receive first
-        if (socket.TryRecvString(out var text))
+        var text = socket.RecvString(RecvFlags.DontWait);
+        if (text != null)
         {
-            return text!;
+            return text;
         }
 
         // Slow path: Poll until ready
@@ -248,7 +250,7 @@ public static class SocketAsyncExtensions
                 // Poll with short timeout to check if socket has data available
                 if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
-                    return socket.RecvString();
+                    return socket.RecvString()!;
                 }
 
                 // Small delay to avoid busy-waiting
