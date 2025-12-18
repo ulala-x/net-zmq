@@ -204,7 +204,7 @@ public sealed class MessagePool
 
         // Thread-safe callback wrapper to ensure single execution
         int callbackExecuted = 0;
-        return new Message(nativePtr, size, ptr =>
+        var msg = new Message(nativePtr, size, ptr =>
         {
             // Ensure callback executes only once (handles concurrent invocation)
             if (Interlocked.CompareExchange(ref callbackExecuted, 1, 0) == 0)
@@ -212,6 +212,71 @@ public sealed class MessagePool
                 Return(ptr, capturedSize, capturedBucketIndex);
             }
         });
+
+        msg._poolDataPtr = nativePtr;
+        msg._poolBucketIndex = bucketIndex;
+        msg._poolActualSize = actualSize;
+
+        return msg;
+    }
+
+    /// <summary>
+    /// 수신 작업을 위해 지정된 크기의 풀링된 메시지 버퍼를 대여합니다.
+    /// Socket.ReceiveWithPool()에 최적화되어 있으며, 데이터가 버퍼에 복사됩니다.
+    /// </summary>
+    /// <param name="size">할당할 버퍼 크기</param>
+    /// <param name="withCallback">
+    /// true: 전송 시 ZMQ가 자동으로 버퍼 반환 (resend 시나리오용)
+    /// false: Dispose() 후 반드시 MessagePool.Shared.Return(msg)를 호출해야 합니다.
+    /// </param>
+    /// <returns>풀링된 버퍼를 가진 Message</returns>
+    public Message Rent(int size, bool withCallback = false)
+    {
+        int bucketIndex = SelectBucket(size);
+
+        nint nativePtr;
+        int actualSize;
+
+        if (bucketIndex == -1 || !TryRentFromBucket(bucketIndex, out nativePtr))
+        {
+            actualSize = bucketIndex >= 0 ? BucketSizes[bucketIndex] : size;
+            nativePtr = Marshal.AllocHGlobal(actualSize);
+            Interlocked.Increment(ref _poolMisses);
+        }
+        else
+        {
+            actualSize = BucketSizes[bucketIndex];
+            Interlocked.Increment(ref _poolHits);
+        }
+
+        Interlocked.Increment(ref _totalRents);
+
+        Message msg;
+
+        if (withCallback)
+        {
+            var capturedSize = actualSize;
+            var capturedBucketIndex = bucketIndex;
+            int callbackExecuted = 0;
+
+            msg = new Message(nativePtr, size, ptr =>
+            {
+                if (Interlocked.CompareExchange(ref callbackExecuted, 1, 0) == 0)
+                {
+                    Return(ptr, capturedSize, capturedBucketIndex);
+                }
+            });
+        }
+        else
+        {
+            msg = new Message(nativePtr, size, freeCallback: null);
+        }
+
+        msg._poolDataPtr = nativePtr;
+        msg._poolBucketIndex = bucketIndex;
+        msg._poolActualSize = actualSize;
+
+        return msg;
     }
 
     /// <summary>
@@ -359,6 +424,41 @@ public sealed class MessagePool
                 Interlocked.Decrement(ref _bucketCounts[i]);
             }
         }
+    }
+
+    /// <summary>
+    /// 풀링된 Message 버퍼를 수동으로 풀에 반환합니다.
+    ///
+    /// 중요: withCallback=false로 대여한 메시지에 대해서만 호출하세요.
+    /// 메시지를 전송한 경우, ZMQ가 callback을 통해 자동으로 반환합니다.
+    ///
+    /// 이 메서드는 멱등성을 가집니다 - 여러 번 호출하거나
+    /// callback을 통한 자동 반환 후에 호출해도 안전합니다
+    /// (CompareExchange를 사용하여 단일 실행 보장).
+    /// </summary>
+    /// <param name="msg">풀에 반환할 Message</param>
+    /// <example>
+    /// <code>
+    /// // 재전송 없이 수신하는 경우
+    /// using var msg = socket.ReceiveWithPool(resend: false);
+    /// ProcessMessage(msg.Data);
+    /// msg.Dispose();
+    /// MessagePool.Shared.Return(msg);  // 필수!
+    ///
+    /// // 재전송하는 경우
+    /// using var msg = socket.ReceiveWithPool(resend: true);
+    /// otherSocket.Send(msg);  // ZMQ callback으로 자동 반환
+    /// </code>
+    /// </example>
+    public void Return(Message msg)
+    {
+        if (msg._poolBucketIndex == -1)
+            return;
+
+        if (msg._poolDataPtr == nint.Zero)
+            return;
+
+        Return(msg._poolDataPtr, msg._poolActualSize, msg._poolBucketIndex);
     }
 
     /// <summary>

@@ -16,6 +16,9 @@ public sealed class Message : IDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _wasSuccessfullySent;
+    internal nint _poolDataPtr = nint.Zero;     // 풀 반환을 위한 네이티브 포인터
+    internal int _poolBucketIndex = -1;          // 풀의 버킷 인덱스
+    internal int _poolActualSize = -1;           // 실제 할당된 크기
 
     /// <summary>
     /// Initializes an empty message.

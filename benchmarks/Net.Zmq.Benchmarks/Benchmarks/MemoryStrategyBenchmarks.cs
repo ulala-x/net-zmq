@@ -449,4 +449,75 @@ public class MemoryStrategyBenchmarks
             throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
         }
     }
+
+    // ========================================
+    // MessagePooled with ReceivePool approach: Full pooling for both send and receive
+    // ========================================
+    /// <summary>
+    /// MessagePooled with ReceivePool approach: Use MessagePool for both sending and receiving.
+    /// Send: Rent from MessagePool (automatically returned via ZMQ free callback after transmission).
+    /// Receive: Use ReceiveWithPool (must manually return to pool after processing).
+    /// Expected: Minimal native memory allocations, best performance for both send/recv paths.
+    /// </summary>
+    [Benchmark]
+    public void MessagePooled_SendRecv_WithReceivePool()
+    {
+        var countdown = new CountdownEvent(1);
+        var thread = new Thread(() =>
+        {
+            int n = 0;
+
+            while (n < MessageCount)
+            {
+                // First message: blocking wait
+                _router2.Recv(_identityBuffer);
+
+                // Receive: ReceiveWithPool 사용 (resend=false, 수동 반환)
+                Message msg;
+                using (msg = _router2.ReceiveWithPool(resend: false))
+                {
+                    // Use msg.Data directly (no copy to managed memory)
+                    // External consumer would use msg.Data here
+                }
+
+                // IMPORTANT: Explicitly return to pool after use
+                MessagePool.Shared.Return(msg);
+
+                n++;
+
+                // Batch receive available messages
+                while (n < MessageCount && _router2.TryRecv(_identityBuffer, out _))
+                {
+                    // Receive into pooled Message
+                    using (msg = _router2.ReceiveWithPool(resend: false))
+                    {
+                        // Use msg.Data directly (no copy to managed memory)
+                        // External consumer would use msg.Data here
+                    }
+
+                    // IMPORTANT: Explicitly return to pool after use
+                    MessagePool.Shared.Return(msg);
+
+                    n++;
+                }
+            }
+            countdown.Signal();
+        });
+        thread.Start();
+
+        // Sender: use MessagePool to rent pooled native memory + zero-copy Message
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+
+            // Rent from MessagePool (automatically returned via ZMQ free callback after transmission)
+            using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, (int)MessageSize));
+            _router1.Send(msg, SendFlags.DontWait);
+        }
+
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
+    }
 }

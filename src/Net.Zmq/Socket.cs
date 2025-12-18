@@ -13,6 +13,8 @@ public sealed class Socket : IDisposable
 {
     private readonly ZmqSocketHandle _handle;
     private bool _disposed;
+    private nint _recvBufferPtr = nint.Zero;
+    private const int MaxRecvBufferSize = 4 * 1024 * 1024;  // 4 MB
 
     /// <summary>
     /// Creates a new ZMQ socket with the specified type.
@@ -27,6 +29,7 @@ public sealed class Socket : IDisposable
         var ptr = LibZmq.Socket(context.Handle, (int)socketType);
         ZmqException.ThrowIfNull(ptr);
         _handle = new ZmqSocketHandle(ptr, true);
+        _recvBufferPtr = Marshal.AllocHGlobal(MaxRecvBufferSize);
     }
 
     internal nint Handle
@@ -412,6 +415,59 @@ public sealed class Socket : IDisposable
     }
 
     /// <summary>
+    /// MessagePool을 사용하여 최적화된 메모리 관리로 메시지를 수신합니다.
+    /// 재사용 수신 버퍼를 사용하여 할당 오버헤드를 최소화합니다.
+    /// </summary>
+    /// <param name="flags">수신 플래그</param>
+    /// <param name="resend">
+    /// true: 메시지를 전송 가능 (ZMQ callback으로 자동 반환)
+    /// false (기본값): 로컬 처리만. Dispose() 후 반드시 MessagePool.Shared.Return(msg)를 호출해야 합니다.
+    /// </param>
+    /// <returns>풀링된 Message. resend=false인 경우 MessagePool.Shared.Return(msg) 호출 필수.</returns>
+    /// <exception cref="ObjectDisposedException">Socket이 Dispose됨</exception>
+    /// <exception cref="ZmqException">수신 작업 실패</exception>
+    /// <example>
+    /// <code>
+    /// // 케이스 1: 수신 후 로컬 처리 (기본값, resend=false)
+    /// using (var msg = socket.ReceiveWithPool())
+    /// {
+    ///     ProcessMessage(msg.Data);
+    /// }
+    /// MessagePool.Shared.Return(msg);  // 필수!
+    ///
+    /// // 케이스 2: 수신 후 전달 (resend=true)
+    /// using (var msg = socket.ReceiveWithPool(resend: true))
+    /// {
+    ///     otherSocket.Send(msg);  // ZMQ가 자동 반환
+    /// }
+    /// </code>
+    /// </example>
+    public Message ReceiveWithPool(RecvFlags flags = RecvFlags.None, bool resend = false)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // 1. 재사용 버퍼로 수신
+        int actualSize;
+        unsafe
+        {
+            var span = new Span<byte>((void*)_recvBufferPtr, MaxRecvBufferSize);
+            actualSize = Recv(span, flags);
+        }
+
+        // 2. 풀링된 버퍼 대여
+        var msg = MessagePool.Shared.Rent(actualSize, withCallback: resend);
+
+        // 3. 수신한 데이터를 풀링된 버퍼에 복사
+        unsafe
+        {
+            var recvSpan = new ReadOnlySpan<byte>((void*)_recvBufferPtr, actualSize);
+            recvSpan.CopyTo(msg.Data);
+        }
+
+        return msg;
+    }
+
+    /// <summary>
     /// Tries to receive data as a byte array without blocking.
     /// </summary>
     /// <param name="data">The received data.</param>
@@ -757,6 +813,11 @@ public sealed class Socket : IDisposable
         if (!_disposed)
         {
             _handle.Dispose();
+            if (_recvBufferPtr != nint.Zero)
+            {
+                Marshal.FreeHGlobal(_recvBufferPtr);
+                _recvBufferPtr = nint.Zero;
+            }
             _disposed = true;
         }
     }
