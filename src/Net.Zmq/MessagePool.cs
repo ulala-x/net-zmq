@@ -115,7 +115,7 @@ public sealed class MessagePool
     public static MessagePool Shared { get; } = new();
 
     // Native memory buffers organized by size bucket
-    private readonly ConcurrentBag<nint>[] _buffers;
+    private readonly ConcurrentStack<nint>[] _buffers;
     private readonly int[] _bucketCounts;
 
     // Statistics
@@ -129,12 +129,12 @@ public sealed class MessagePool
     /// </summary>
     public MessagePool()
     {
-        _buffers = new ConcurrentBag<nint>[BucketSizes.Length];
+        _buffers = new ConcurrentStack<nint>[BucketSizes.Length];
         _bucketCounts = new int[BucketSizes.Length];
 
         for (int i = 0; i < _buffers.Length; i++)
         {
-            _buffers[i] = new ConcurrentBag<nint>();
+            _buffers[i] = new ConcurrentStack<nint>();
         }
     }
 
@@ -192,10 +192,17 @@ public sealed class MessagePool
         Interlocked.Increment(ref _totalRents);
 
         // Copy data to native memory
+        // unsafe
+        // {
+        //     var span = new Span<byte>((void*)nativePtr, size);
+        //     data.CopyTo(span);
+        // }
         unsafe
         {
-            var span = new Span<byte>((void*)nativePtr, size);
-            data.CopyTo(span);
+            fixed (byte* srcPtr = data)
+            {
+                Buffer.MemoryCopy(srcPtr, (void*)nativePtr, size, size);
+            }
         }
 
         // Create zero-copy Message with free callback
@@ -217,6 +224,7 @@ public sealed class MessagePool
         msg._poolBucketIndex = bucketIndex;
         msg._poolActualSize = actualSize;
         msg._isPooled = false;  // callback이 있으므로 수동 반환 불필요
+        msg._poolInstance = this;  // 이 풀 인스턴스에서 할당됨
 
         return msg;
     }
@@ -277,6 +285,7 @@ public sealed class MessagePool
         msg._poolBucketIndex = bucketIndex;
         msg._poolActualSize = actualSize;
         msg._isPooled = !withCallback;  // callback 없으면 풀 마킹
+        msg._poolInstance = this;  // 이 풀 인스턴스에서 할당됨
 
         return msg;
     }
@@ -305,7 +314,7 @@ public sealed class MessagePool
     /// </summary>
     private bool TryRentFromBucket(int bucketIndex, out nint pointer)
     {
-        if (_buffers[bucketIndex].TryTake(out pointer))
+        if (_buffers[bucketIndex].TryPop(out pointer))
         {
             Interlocked.Decrement(ref _bucketCounts[bucketIndex]);
             return true;
@@ -344,7 +353,7 @@ public sealed class MessagePool
 
         // Return to pool
         Interlocked.Increment(ref _bucketCounts[bucketIndex]);
-        _buffers[bucketIndex].Add(pointer);
+        _buffers[bucketIndex].Push(pointer);
     }
 
     /// <summary>
@@ -445,7 +454,7 @@ public sealed class MessagePool
             for (int i = 0; i < toAllocate; i++)
             {
                 nint pointer = Marshal.AllocHGlobal(bucketSize);
-                _buffers[bucketIndex].Add(pointer);
+                _buffers[bucketIndex].Push(pointer);
                 Interlocked.Increment(ref _bucketCounts[bucketIndex]);
             }
         }
@@ -459,7 +468,7 @@ public sealed class MessagePool
     {
         for (int i = 0; i < _buffers.Length; i++)
         {
-            while (_buffers[i].TryTake(out nint pointer))
+            while (_buffers[i].TryPop(out nint pointer))
             {
                 Marshal.FreeHGlobal(pointer);
                 Interlocked.Decrement(ref _bucketCounts[i]);

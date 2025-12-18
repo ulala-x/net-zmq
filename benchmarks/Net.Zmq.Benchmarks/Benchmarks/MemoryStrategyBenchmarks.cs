@@ -32,6 +32,7 @@ public class MemoryStrategyBenchmarks
     public int MessageCount { get; set; }
 
     private byte[] _sourceData = null!; // Simulates external input data
+    private nint _sourceNativeData  ; // Simulates external input data
     private byte[] _recvBuffer = null!; // Fixed buffer for direct recv
     private byte[] _identityBuffer = null!; // Buffer for identity frame
 
@@ -43,6 +44,15 @@ public class MemoryStrategyBenchmarks
     public void Setup()
     {
         // Initialize test data
+        _sourceNativeData = Marshal.AllocHGlobal((int)MessageSize);
+        unsafe
+        {
+            var sourceSpan = new Span<byte>((void*)_sourceNativeData, (int)MessageSize);
+            sourceSpan.Fill((byte)'A');
+        }
+
+
+
         _sourceData = new byte[(int)MessageSize];
         _recvBuffer = new byte[(int)MessageSize];
         _identityBuffer = new byte[64];
@@ -369,8 +379,12 @@ public class MemoryStrategyBenchmarks
             // Copy source data to native memory
             unsafe
             {
-                var nativeSpan = new Span<byte>((void*)nativePtr, (int)MessageSize);
-                _sourceData.AsSpan(0, (int)MessageSize).CopyTo(nativeSpan);
+                Buffer.MemoryCopy(
+                    (void*)_sourceNativeData,
+                    (void*)nativePtr,
+                    (int)MessageSize,
+                    (int)MessageSize
+                );
             }
 
             // Create Message with zero-copy (ZMQ will own this memory)

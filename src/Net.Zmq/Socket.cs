@@ -462,8 +462,9 @@ public sealed class Socket : IDisposable
         int actualSize;
         unsafe
         {
-            var span = new Span<byte>((void*)_recvBufferPtr, MaxRecvBufferSize);
-            actualSize = Recv(span, flags);
+            //var span = new Span<byte>((void*)_recvBufferPtr, MaxRecvBufferSize);
+            actualSize = Recv(_recvBufferPtr, MaxRecvBufferSize,flags);
+
         }
 
         // 2. DontWait + EAGAIN인 경우 null 반환
@@ -473,12 +474,8 @@ public sealed class Socket : IDisposable
         // 3. 풀링된 버퍼 대여
         var msg = MessagePool.Shared.Rent(actualSize, withCallback: resend);
 
-        // 4. 수신한 데이터를 풀링된 버퍼에 복사
-        unsafe
-        {
-            var recvSpan = new ReadOnlySpan<byte>((void*)_recvBufferPtr, actualSize);
-            recvSpan.CopyTo(msg.Data);
-        }
+        // 4. 네이티브 메모리에서 직접 복사 (최적화된 경로)
+        msg.CopyFromNative(_recvBufferPtr, actualSize);
 
         return msg;
     }

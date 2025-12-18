@@ -20,6 +20,7 @@ public sealed class Message : IDisposable
     internal int _poolBucketIndex = -1;          // 풀의 버킷 인덱스
     internal int _poolActualSize = -1;           // 실제 할당된 크기
     internal bool _isPooled = false;             // 풀에서 할당된 메시지 여부
+    internal MessagePool? _poolInstance = null;  // 이 메시지를 할당한 풀 인스턴스
 
     /// <summary>
     /// Initializes an empty message.
@@ -310,16 +311,50 @@ public sealed class Message : IDisposable
     }
 
     /// <summary>
+    /// Copies data from a native memory pointer directly to the message buffer.
+    /// This is an optimized method for ReceiveWithPool that avoids intermediate buffer copies.
+    /// </summary>
+    /// <param name="sourcePtr">Pointer to the source data buffer.</param>
+    /// <param name="size">Size of the data to copy in bytes.</param>
+    /// <exception cref="InvalidOperationException">Thrown if the message is not initialized or does not have a pool buffer.</exception>
+    internal void CopyFromNative(nint sourcePtr, int size)
+    {
+        EnsureInitialized();
+        if (_poolDataPtr == nint.Zero)
+            throw new InvalidOperationException("CopyFromNative requires a message with a pool buffer");
+
+        if (size > _poolActualSize)
+            throw new ArgumentException($"Size {size} exceeds pooled buffer capacity {_poolActualSize}");
+
+        unsafe
+        {
+            // Direct native-to-native memory copy - most efficient
+            NativeMemory.Copy((void*)sourcePtr, (void*)_poolDataPtr, (nuint)size);
+        }
+    }
+
+    /// <summary>
     /// Sends the message on a socket.
     /// </summary>
     /// <param name="socket">The socket handle.</param>
     /// <param name="flags">Send flags.</param>
     /// <returns>The number of bytes sent.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if the message is not initialized.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if the message is not initialized or if attempting to send a pooled message without callback.</exception>
     /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
     internal int Send(nint socket, SendFlags flags)
     {
         EnsureInitialized();
+
+        // Prevent sending pooled messages without callback (received with resend=false)
+        // These messages are meant for consumption only, not forwarding
+        if (_isPooled && _poolDataPtr != nint.Zero)
+        {
+            throw new InvalidOperationException(
+                "Cannot send a pooled message that was received with resend=false. " +
+                "If you need to forward received messages, use ReceiveWithPool(resend: true) " +
+                "which will automatically return the buffer to the pool after transmission.");
+        }
+
         var result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
         ZmqException.ThrowIfError(result);
 
@@ -382,9 +417,9 @@ public sealed class Message : IDisposable
         Marshal.FreeHGlobal(_msgPtr);
 
         // 풀링된 메시지면 자동으로 풀에 반환
-        if (_isPooled && _poolDataPtr != nint.Zero)
+        if (_isPooled && _poolDataPtr != nint.Zero && _poolInstance != null)
         {
-            MessagePool.Shared.ReturnInternal(this);
+            _poolInstance.ReturnInternal(this);
         }
 
         GC.SuppressFinalize(this);
@@ -404,9 +439,9 @@ public sealed class Message : IDisposable
             Marshal.FreeHGlobal(_msgPtr);
 
             // 풀링된 메시지면 자동으로 풀에 반환
-            if (_isPooled && _poolDataPtr != nint.Zero)
+            if (_isPooled && _poolDataPtr != nint.Zero && _poolInstance != null)
             {
-                MessagePool.Shared.ReturnInternal(this);
+                _poolInstance.ReturnInternal(this);
             }
         }
     }
