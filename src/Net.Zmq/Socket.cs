@@ -126,9 +126,14 @@ public sealed class Socket : IDisposable
     /// Sends a span of bytes on the socket.
     /// </summary>
     /// <param name="data">The data to send.</param>
-    /// <param name="flags">Send flags.</param>
-    /// <returns>The number of bytes sent.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
+    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
+    /// <returns>
+    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
+    /// </returns>
+    /// <exception cref="ZmqException">
+    /// Thrown if the operation fails with an error other than EAGAIN.
+    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
+    /// </exception>
     public int Send(ReadOnlySpan<byte> data, SendFlags flags = SendFlags.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -137,7 +142,16 @@ public sealed class Socket : IDisposable
             fixed (byte* ptr = data)
             {
                 var result = LibZmq.Send(Handle, (nint)ptr, (nuint)data.Length, (int)flags);
-                ZmqException.ThrowIfError(result);
+                if (result == -1)
+                {
+                    var errno = LibZmq.Errno();
+                    // Only suppress EAGAIN if DontWait flag is set
+                    if (errno == ZmqConstants.EAGAIN && (flags & SendFlags.DontWait) != 0)
+                        return -1;
+
+                    // For all other errors, or EAGAIN without DontWait, throw
+                    ZmqException.ThrowIfError(-1);
+                }
                 return result;
             }
         }
@@ -147,9 +161,14 @@ public sealed class Socket : IDisposable
     /// Sends a UTF-8 string on the socket.
     /// </summary>
     /// <param name="text">The text to send.</param>
-    /// <param name="flags">Send flags.</param>
-    /// <returns>The number of bytes sent.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
+    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
+    /// <returns>
+    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
+    /// </returns>
+    /// <exception cref="ZmqException">
+    /// Thrown if the operation fails with an error other than EAGAIN.
+    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
+    /// </exception>
     public int Send(string text, SendFlags flags = SendFlags.None)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -187,81 +206,6 @@ public sealed class Socket : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return message.Send(Handle, flags);
-    }
-
-    /// <summary>
-    /// Tries to send a byte array on the socket without blocking.
-    /// </summary>
-    /// <param name="data">The data to send.</param>
-    /// <param name="flags">Send flags (DontWait is added automatically).</param>
-    /// <returns>True if the data was sent; false if the operation would block.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
-    public bool TrySend(byte[] data, SendFlags flags = SendFlags.None)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        return TrySend(data.AsSpan(), flags);
-    }
-
-    /// <summary>
-    /// Tries to send a span of bytes on the socket without blocking.
-    /// </summary>
-    /// <param name="data">The data to send.</param>
-    /// <param name="flags">Send flags (DontWait is added automatically).</param>
-    /// <returns>True if the data was sent; false if the operation would block.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
-    public bool TrySend(ReadOnlySpan<byte> data, SendFlags flags = SendFlags.None)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        flags |= SendFlags.DontWait;
-
-        unsafe
-        {
-            fixed (byte* ptr = data)
-            {
-                var result = LibZmq.Send(Handle, (nint)ptr, (nuint)data.Length, (int)flags);
-                if (result == -1)
-                {
-                    var errno = LibZmq.Errno();
-                    if (errno == ZmqConstants.EAGAIN)
-                        return false;
-                    ZmqException.ThrowIfError(-1);
-                }
-                return true;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Tries to send a UTF-8 string on the socket without blocking.
-    /// </summary>
-    /// <param name="text">The text to send.</param>
-    /// <param name="flags">Send flags (DontWait is added automatically).</param>
-    /// <returns>True if the data was sent; false if the operation would block.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
-    public bool TrySend(string text, SendFlags flags = SendFlags.None)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-
-        // Fast path for small strings using stackalloc
-        var maxByteCount = Encoding.UTF8.GetMaxByteCount(text.Length);
-        if (maxByteCount <= 512)
-        {
-            Span<byte> buffer = stackalloc byte[maxByteCount];
-            var actualByteCount = Encoding.UTF8.GetBytes(text, buffer);
-            return TrySend(buffer.Slice(0, actualByteCount), flags);
-        }
-
-        // Slow path for large strings using ArrayPool
-        var rentedBuffer = ArrayPool<byte>.Shared.Rent(maxByteCount);
-        try
-        {
-            var actualByteCount = Encoding.UTF8.GetBytes(text, rentedBuffer);
-            return TrySend(rentedBuffer.AsSpan(0, actualByteCount), flags);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rentedBuffer);
-        }
     }
 
     #endregion

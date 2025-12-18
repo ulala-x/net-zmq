@@ -143,9 +143,9 @@ socket.Send("Hello World");
 // Send with encoding
 socket.Send("안녕하세요", Encoding.UTF8);
 
-// Try send (non-blocking)
-bool sent = socket.TrySend("Hello", out int bytesSent);
-if (sent)
+// Non-blocking send
+int bytesSent = socket.Send("Hello", SendFlags.DontWait);
+if (bytesSent != -1)
 {
     Console.WriteLine($"Sent {bytesSent} bytes");
 }
@@ -158,11 +158,8 @@ if (sent)
 byte[] data = [1, 2, 3, 4, 5];
 socket.Send(data);
 
-// Send with flags
-socket.Send(data, SendFlags.DontWait);
-
-// Try send bytes
-bool sent = socket.TrySend(data, out int bytesSent);
+// Non-blocking send
+int bytesSent = socket.Send(data, SendFlags.DontWait); // -1 if would block
 ```
 
 #### Send Multi-part Messages

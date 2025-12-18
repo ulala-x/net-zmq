@@ -171,7 +171,7 @@ socket.Disconnect("tcp://localhost:5555");
 socket.Send("Hello");
 socket.Send(byteArray);
 socket.Send(ref message, SendFlags.SendMore);
-bool sent = socket.TrySend(data, out int bytesSent);
+int result = socket.Send(data, SendFlags.DontWait); // -1 if would block
 
 // Receive
 string str = socket.RecvString();

@@ -177,7 +177,7 @@ public class CoreTypesTests
         Assert.Null(pull.RecvString(RecvFlags.DontWait));
 
         // Send and receive
-        Assert.True(push.TrySend("Test"));
+        Assert.NotEqual(-1, push.Send("Test", SendFlags.DontWait));
         Thread.Sleep(50); // Allow message to propagate
         var text = pull.RecvString(RecvFlags.DontWait);
         Assert.NotNull(text);

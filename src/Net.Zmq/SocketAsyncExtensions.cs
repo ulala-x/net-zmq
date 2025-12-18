@@ -87,7 +87,7 @@ public static class SocketAsyncExtensions
         ArgumentNullException.ThrowIfNull(socket);
 
         // Fast path: Try non-blocking send first
-        if (socket.TrySend(data.Span, SendFlags.None))
+        if (socket.Send(data.Span, SendFlags.DontWait) != -1)
         {
             return data.Length;
         }
@@ -135,7 +135,7 @@ public static class SocketAsyncExtensions
         ArgumentNullException.ThrowIfNull(text);
 
         // Fast path: Try non-blocking send first
-        if (socket.TrySend(text, SendFlags.None))
+        if (socket.Send(text, SendFlags.DontWait) != -1)
         {
             return Encoding.UTF8.GetByteCount(text);
         }
