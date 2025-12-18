@@ -158,6 +158,40 @@ public sealed class Socket : IDisposable
     }
 
     /// <summary>
+    /// Sends data from a native memory buffer to the socket.
+    /// This method is optimized for native memory and avoids the pinning overhead of managed memory.
+    /// </summary>
+    /// <param name="data">Pointer to the native memory buffer containing the data to send.</param>
+    /// <param name="size">Size of the data in bytes.</param>
+    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
+    /// <returns>
+    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if size is negative.</exception>
+    /// <exception cref="ZmqException">
+    /// Thrown if the operation fails with an error other than EAGAIN.
+    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
+    /// </exception>
+    public int Send(nint data, int size, SendFlags flags = SendFlags.None)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfNegative(size);
+
+        var result = LibZmq.Send(Handle, data, (nuint)size, (int)flags);
+        if (result == -1)
+        {
+            var errno = LibZmq.Errno();
+            // Only suppress EAGAIN if DontWait flag is set
+            if (errno == ZmqConstants.EAGAIN && (flags & SendFlags.DontWait) != 0)
+                return -1;
+
+            // For all other errors, or EAGAIN without DontWait, throw
+            ZmqException.ThrowIfError(-1);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Sends a UTF-8 string on the socket.
     /// </summary>
     /// <param name="text">The text to send.</param>
@@ -263,6 +297,40 @@ public sealed class Socket : IDisposable
                 return result;
             }
         }
+    }
+
+    /// <summary>
+    /// Receives data from the socket into a native memory buffer.
+    /// This method is optimized for native memory and avoids the pinning overhead of managed memory.
+    /// </summary>
+    /// <param name="buffer">Pointer to the native memory buffer.</param>
+    /// <param name="size">Size of the buffer in bytes.</param>
+    /// <param name="flags">Receive flags.</param>
+    /// <returns>
+    /// The number of bytes received, or -1 if the operation would block (only when DontWait flag is set).
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if size is negative.</exception>
+    /// <exception cref="ZmqException">
+    /// Thrown if the operation fails with an error other than EAGAIN.
+    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
+    /// </exception>
+    public int Recv(nint buffer, int size, RecvFlags flags = RecvFlags.None)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfNegative(size);
+
+        var result = LibZmq.Recv(Handle, buffer, (nuint)size, (int)flags);
+        if (result == -1)
+        {
+            var errno = LibZmq.Errno();
+            // Only suppress EAGAIN if DontWait flag is set
+            if (errno == ZmqConstants.EAGAIN && (flags & RecvFlags.DontWait) != 0)
+                return -1;
+
+            // For all other errors, or EAGAIN without DontWait, throw
+            ZmqException.ThrowIfError(-1);
+        }
+        return result;
     }
 
     /// <summary>
