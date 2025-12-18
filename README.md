@@ -186,30 +186,62 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## Performance
 
-Net.Zmq provides multiple receive modes (Blocking, NonBlocking, Poller) and memory strategies (ByteArray, ArrayPool, Message, MessageZeroCopy) to accommodate different performance requirements.
+Net.Zmq offers multiple strategies for high-performance messaging. Choose the right approach based on your use case.
 
-### Representative Performance
+### Quick Start Guide
 
-Performance characteristics vary based on message size, receive mode, and memory strategy.
+**Sending Messages:**
 
-**Note**: The ranges below represent results across all receive modes (Blocking, Poller, NonBlocking with Sleep(1ms)) and memory strategies (ByteArray, ArrayPool, Message, MessageZeroCopy).
+1. **Using External Memory** - Flexible, automatic optimization:
+   ```csharp
+   byte[] data = GetDataFromSomewhere();
+   socket.SendOptimized(data);  // Automatically chooses best strategy by size
+   ```
 
-| Message Size | Throughput Range | Data Throughput | Latency Range | Notes |
-|--------------|------------------|-----------------|---------------|-------|
-| **64 bytes** | 1.53M - 4.30M/sec | 0.78 - 2.20 Gbps | 232 - 654 ns | Blocking and Poller modes show similar performance; managed strategies preferred |
-| **1.5 KB** | 705K - 977K/sec | 8.47 - 11.72 Gbps | 1.02 - 1.42 μs | Performance converges across strategies; GC pressure begins with ByteArray |
-| **65 KB** | 33K - 77K/sec | 2.06 - 4.68 GB/s | 13.1 - 29.6 μs | Native strategies avoid GC pressure; NonBlocking shows degraded performance |
+2. **Maximum Performance** - Consistent zero-copy for all sizes:
+   ```csharp
+   using var msg = MessagePool.Shared.Rent(MessageSize.Small);
+   // Write your data to msg.Data
+   socket.Send(ref msg, SendFlags.None);
+   ```
 
-### Selection Guidance
+**Receiving Messages:**
 
-- **Blocking and Poller modes** deliver comparable performance (within 2-3% for most workloads)
-- **NonBlocking mode** introduces additional latency due to polling overhead
-- **Memory strategies** show performance differences based on message size and GC sensitivity
-- **GC-free strategies** (ArrayPool, Message, MessageZeroCopy) recommended for large messages or high-throughput scenarios
+```csharp
+using var poller = new Poller(1);
+int idx = poller.Add(socket, PollEvents.In);
+
+using var msg = new Message();
+if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
+{
+    socket.Recv(ref msg, RecvFlags.None);
+    // Process msg.Data
+}
+```
+
+### Benchmark Results Summary
+
+| Message Size | Best Send Strategy | Throughput | Best Receive Mode | Throughput |
+|--------------|-------------------|------------|-------------------|------------|
+| **64 bytes** | ArrayPool | 4,082 K/sec | Poller | 5,464 K/sec |
+| **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 1,969 K/sec |
+| **1 KB** | MessagePool | 1,424 K/sec | Poller | 1,377 K/sec |
+| **64 KB** | MessagePool | 83.2 K/sec | Blocking | 69.8 K/sec |
+
+**Key Insights:**
+
+- **Send Strategies:**
+  - Small messages (<1KB): ArrayPool is fastest (auto-selected by `SendOptimized()`)
+  - Large messages (≥1KB): MessagePool is 18-23% faster, provides consistent zero-copy
+
+- **Receive Modes:**
+  - Poller mode is best for most scenarios (simple API + high performance)
+  - Blocking mode slightly better for very large messages (64KB+)
+  - NonBlocking mode is consistently slowest (avoid unless necessary)
 
 **Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-For detailed benchmark results, performance analysis, and selection guidance, see [docs/benchmarks.md](docs/benchmarks.md).
+For detailed benchmark results, usage examples, and decision flowcharts, see [benchmarks/Net.Zmq.Benchmarks/README.md](benchmarks/Net.Zmq.Benchmarks/README.md).
 
 ## Supported Platforms
 

@@ -59,8 +59,8 @@ public sealed class MessagePool
 {
     // Bucket sizes: powers of 2 from 16 bytes to 4 MB
     // IMPORTANT: Must be declared before Shared to ensure proper initialization order
-    private static readonly int[] BucketSizes = new[]
-    {
+    private static readonly int[] BucketSizes =
+    [
         16,       // 16 B
         32,       // 32 B
         64,       // 64 B
@@ -80,7 +80,7 @@ public sealed class MessagePool
         1048576,  // 1 MB
         2097152,  // 2 MB
         4194304   // 4 MB
-    };
+    ];
 
     private const int MaxBuffersPerBucket = 500;
     private const int MaxPoolableSize = 4194304; // 4MB
@@ -88,7 +88,7 @@ public sealed class MessagePool
     /// <summary>
     /// Shared singleton instance of MessagePool.
     /// </summary>
-    public static MessagePool Shared { get; } = new MessagePool();
+    public static MessagePool Shared { get; } = new();
 
     // Native memory buffers organized by size bucket
     private readonly ConcurrentBag<nint>[] _buffers;
@@ -299,7 +299,7 @@ public sealed class MessagePool
     /// </summary>
     /// <param name="messageSizes">Array of message sizes to pre-warm.</param>
     /// <param name="countPerSize">Number of buffers to allocate per size.</param>
-    public void Prewarm(int[] messageSizes, int countPerSize)
+    private void Prewarm(int[] messageSizes, int countPerSize)
     {
         foreach (int size in messageSizes)
         {

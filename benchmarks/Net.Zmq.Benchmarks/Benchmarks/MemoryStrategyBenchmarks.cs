@@ -25,8 +25,8 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 [GcServer(true)]
 public class MemoryStrategyBenchmarks
 {
-    [Params(64, 512, 1024, 65536)]
-    public int MessageSize { get; set; }
+    [Params(MessageSize.B64, MessageSize.B512, MessageSize.K1, MessageSize.K64)]
+    public  MessageSize MessageSize { get; set; }
 
     [Params(10000)]
     public int MessageCount { get; set; }
@@ -43,8 +43,8 @@ public class MemoryStrategyBenchmarks
     public void Setup()
     {
         // Initialize test data
-        _sourceData = new byte[MessageSize];
-        _recvBuffer = new byte[MessageSize];
+        _sourceData = new byte[(int)MessageSize];
+        _recvBuffer = new byte[(int)MessageSize];
         _identityBuffer = new byte[64];
         Array.Fill(_sourceData, (byte)'A');
 
@@ -157,8 +157,8 @@ public class MemoryStrategyBenchmarks
         {
             _router1.Send(_router2Id, SendFlags.SendMore);
 
-            var sendBuffer = new byte[MessageSize];
-            _sourceData.AsSpan(0, MessageSize).CopyTo(sendBuffer);
+            var sendBuffer = new byte[(int)MessageSize];
+            _sourceData.AsSpan(0, (int)MessageSize).CopyTo(sendBuffer);
             _router1.Send(sendBuffer, SendFlags.DontWait);
         }
 
@@ -234,11 +234,11 @@ public class MemoryStrategyBenchmarks
         {
             _router1.Send(_router2Id, SendFlags.SendMore);
 
-            var sendBuffer = ArrayPool<byte>.Shared.Rent(MessageSize);
+            var sendBuffer = ArrayPool<byte>.Shared.Rent((int)MessageSize);
             try
             {
-                _sourceData.AsSpan(0, MessageSize).CopyTo(sendBuffer);
-                _router1.Send(sendBuffer.AsSpan(0, MessageSize), SendFlags.DontWait);
+                _sourceData.AsSpan(0, (int) MessageSize).CopyTo(sendBuffer);
+                _router1.Send(sendBuffer.AsSpan(0,(int) MessageSize), SendFlags.DontWait);
             }
             finally
             {
