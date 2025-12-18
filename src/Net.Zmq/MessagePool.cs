@@ -304,7 +304,7 @@ public sealed class MessagePool
     /// <param name="count">Number of buffers to allocate.</param>
     public void Prewarm(MessageSize size, int count)
     {
-        Prewarm(new[] { (int)size }, count);
+        Prewarm([(int)size], count);
     }
 
     /// <summary>
@@ -386,6 +386,47 @@ public sealed class MessagePool
             throw new ArgumentException($"Size {size} ({(int)size} bytes) is not poolable (max: {MaxPoolableSize} bytes)", nameof(size));
 
         MaxBuffersPerBucket[bucketIndex] = maxBuffers;
+    }
+
+    /// <summary>
+    /// Sets the maximum number of buffers for multiple bucket sizes at once.
+    /// This allows batch configuration of pool limits.
+    /// </summary>
+    /// <param name="configuration">Dictionary mapping message sizes to their maximum buffer counts.</param>
+    /// <exception cref="ArgumentNullException">If configuration is null.</exception>
+    /// <exception cref="ArgumentException">If any size is not poolable or any maxBuffers value is not positive.</exception>
+    /// <example>
+    /// <code>
+    /// // Configure multiple sizes at once
+    /// MessagePool.Shared.SetMaxBuffers(new Dictionary&lt;MessageSize, int&gt;
+    /// {
+    ///     { MessageSize.K1, 1000 },
+    ///     { MessageSize.K64, 200 },
+    ///     { MessageSize.M1, 100 }
+    /// });
+    /// </code>
+    /// </example>
+    public void SetMaxBuffers(Dictionary<MessageSize, int> configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        // Validate all entries first before applying any changes
+        foreach (var kvp in configuration)
+        {
+            if (kvp.Value <= 0)
+                throw new ArgumentException($"maxBuffers must be positive for size {kvp.Key}", nameof(configuration));
+
+            int bucketIndex = SelectBucket((int)kvp.Key);
+            if (bucketIndex == -1)
+                throw new ArgumentException($"Size {kvp.Key} ({(int)kvp.Key} bytes) is not poolable (max: {MaxPoolableSize} bytes)", nameof(configuration));
+        }
+
+        // Apply changes after validation
+        foreach (var kvp in configuration)
+        {
+            int bucketIndex = SelectBucket((int)kvp.Key);
+            MaxBuffersPerBucket[bucketIndex] = kvp.Value;
+        }
     }
 
     /// <summary>
