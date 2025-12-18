@@ -438,7 +438,7 @@ public class MemoryStrategyBenchmarks
         {
             _router1.Send(_router2Id, SendFlags.SendMore);
 
-            // Rent from MessagePool (automatically returned on disposal)
+            // Rent from MessagePool (automatically returned via ZMQ free callback after transmission)
             using var msg = MessagePool.Shared.Rent(_sourceData.AsSpan(0, MessageSize));
             _router1.Send(msg, SendFlags.DontWait);
 

@@ -117,9 +117,32 @@ public sealed class MessagePool
     /// <summary>
     /// Rents a Message backed by pooled native memory and copies the provided data into it.
     /// The returned Message will automatically return the buffer to the pool when disposed.
+    ///
+    /// <para>
+    /// <strong>IMPORTANT - Automatic Return Behavior:</strong>
+    /// <list type="bullet">
+    /// <item>If you call socket.Send(message), the buffer is returned when ZMQ finishes transmission via free callback</item>
+    /// <item>If you DON'T send the message, the buffer is returned when you Dispose() the message via zmq_msg_close()</item>
+    /// <item>You should always use 'using var msg = ...' pattern for automatic disposal</item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>
+    /// Unlike ArrayPool, you do NOT need to call Return() manually. The pool uses ZMQ's
+    /// free callback mechanism to automatically return buffers at the correct time, ensuring
+    /// buffers aren't returned while ZMQ is still using them.
+    /// </para>
+    ///
+    /// <example>
+    /// <code>
+    /// using var msg = MessagePool.Shared.Rent(data);
+    /// socket.Send(msg);
+    /// // Buffer automatically returned to pool after ZMQ transmission completes
+    /// </code>
+    /// </example>
     /// </summary>
     /// <param name="data">The data to copy into the message.</param>
-    /// <returns>A Message instance that will automatically return the buffer to the pool on disposal.</returns>
+    /// <returns>A Message instance that will automatically return the buffer to the pool.</returns>
     public Message Rent(ReadOnlySpan<byte> data)
     {
         int size = data.Length;
@@ -155,10 +178,15 @@ public sealed class MessagePool
         var capturedSize = actualSize;
         var capturedBucketIndex = bucketIndex;
 
+        // Thread-safe callback wrapper to ensure single execution
+        int callbackExecuted = 0;
         return new Message(nativePtr, size, ptr =>
         {
-            // ZMQ calls this when done with the message
-            Return(ptr, capturedSize, capturedBucketIndex);
+            // Ensure callback executes only once (handles concurrent invocation)
+            if (Interlocked.CompareExchange(ref callbackExecuted, 1, 0) == 0)
+            {
+                Return(ptr, capturedSize, capturedBucketIndex);
+            }
         });
     }
 

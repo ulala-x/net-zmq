@@ -15,6 +15,7 @@ public sealed class Message : IDisposable
     private readonly nint _msgPtr;
     private bool _initialized;
     private bool _disposed;
+    private bool _wasSuccessfullySent;
 
     /// <summary>
     /// Initializes an empty message.
@@ -317,6 +318,11 @@ public sealed class Message : IDisposable
         EnsureInitialized();
         var result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
         ZmqException.ThrowIfError(result);
+
+        // Mark as successfully sent - ZMQ now owns this message
+        // Do NOT call zmq_msg_close() in Dispose() for sent messages
+        _wasSuccessfullySent = true;
+
         return result;
     }
 
@@ -359,7 +365,13 @@ public sealed class Message : IDisposable
 
         if (_initialized)
         {
-            LibZmq.MsgClosePtr(_msgPtr);
+            // Only close message if it was NOT successfully sent
+            // If sent, ZMQ owns it and will invoke the free callback
+            // If not sent, we must close it to invoke the free callback
+            if (!_wasSuccessfullySent)
+            {
+                LibZmq.MsgClosePtr(_msgPtr);
+            }
             _initialized = false;
         }
 
