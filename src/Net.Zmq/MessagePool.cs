@@ -322,7 +322,8 @@ public sealed class MessagePool
     /// This helps avoid allocation overhead during benchmarks.
     /// </summary>
     /// <param name="messageSizes">Array of message sizes to pre-warm.</param>
-    /// <param name="countPerSize">Number of buffers to allocate per size.</param>
+    /// <param name="countPerSize">Number of buffers to allocate per size.
+    /// Actual allocation will not exceed the bucket's maximum buffer limit.</param>
     private void Prewarm(int[] messageSizes, int countPerSize)
     {
         foreach (int size in messageSizes)
@@ -333,7 +334,7 @@ public sealed class MessagePool
 
             int bucketSize = BucketSizes[bucketIndex];
             int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
-            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - currentCount);
+            int toAllocate = Math.Min(countPerSize, Math.Max(0, MaxBuffersPerBucket[bucketIndex] - currentCount));
 
             for (int i = 0; i < toAllocate; i++)
             {
