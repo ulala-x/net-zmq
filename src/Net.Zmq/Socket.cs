@@ -410,13 +410,9 @@ public sealed class Socket : IDisposable
     /// 재사용 수신 버퍼를 사용하여 할당 오버헤드를 최소화합니다.
     /// </summary>
     /// <param name="flags">수신 플래그. If DontWait flag is set and no message is available (EAGAIN), returns null instead of throwing.</param>
-    /// <param name="resend">
-    /// true: 메시지를 전송 가능 (ZMQ callback으로 자동 반환)
-    /// false (기본값): 로컬 처리만. Dispose() 후 반드시 MessagePool.Shared.Return(msg)를 호출해야 합니다.
-    /// </param>
     /// <returns>
     /// 풀링된 Message, or null if DontWait flag was set and no message is available (EAGAIN).
-    /// resend=false인 경우 MessagePool.Shared.Return(msg) 호출 필수.
+    /// 메시지는 Send()를 통해 전송 시 ZMQ callback으로 자동 반환됩니다.
     /// </returns>
     /// <exception cref="ObjectDisposedException">Socket이 Dispose됨</exception>
     /// <exception cref="ZmqException">
@@ -425,21 +421,14 @@ public sealed class Socket : IDisposable
     /// </exception>
     /// <example>
     /// <code>
-    /// // 케이스 1: 수신 후 로컬 처리 (기본값, resend=false)
+    /// // 케이스 1: 수신 후 다른 소켓으로 전송
     /// using (var msg = socket.ReceiveWithPool())
-    /// {
-    ///     ProcessMessage(msg.Data);
-    /// }
-    /// MessagePool.Shared.Return(msg);  // 필수!
-    ///
-    /// // 케이스 2: 수신 후 전달 (resend=true)
-    /// using (var msg = socket.ReceiveWithPool(resend: true))
     /// {
     ///     otherSocket.Send(msg);  // ZMQ가 자동 반환
     /// }
     ///
-    /// // 케이스 3: DontWait 플래그로 논블로킹 수신
-    /// var msg = socket.ReceiveWithPool(RecvFlags.DontWait, resend: false);
+    /// // 케이스 2: DontWait 플래그로 논블로킹 수신
+    /// var msg = socket.ReceiveWithPool(RecvFlags.DontWait);
     /// if (msg == null)
     /// {
     ///     // No message available
@@ -448,35 +437,21 @@ public sealed class Socket : IDisposable
     /// {
     ///     using (msg)
     ///     {
-    ///         ProcessMessage(msg.Data);
+    ///         otherSocket.Send(msg);
     ///     }
-    ///     MessagePool.Shared.Return(msg);  // 필수!
     /// }
     /// </code>
     /// </example>
-    public Message? ReceiveWithPool(RecvFlags flags = RecvFlags.None, bool resend = false)
+    public Message? ReceiveWithPool(RecvFlags flags = RecvFlags.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // 1. 재사용 버퍼로 수신
-        int actualSize;
-        unsafe
-        {
-            //var span = new Span<byte>((void*)_recvBufferPtr, MaxRecvBufferSize);
-            actualSize = Recv(_recvBufferPtr, MaxRecvBufferSize,flags);
-
-        }
-
-        // 2. DontWait + EAGAIN인 경우 null 반환
+        int actualSize = Recv(_recvBufferPtr, MaxRecvBufferSize, flags);
         if (actualSize == -1)
             return null;
 
-        // 3. 풀링된 버퍼 대여
-        var msg = MessagePool.Shared.Rent(actualSize, withCallback: resend);
-
-        // 4. 네이티브 메모리에서 직접 복사 (최적화된 경로)
+        var msg = MessagePool.Shared.Rent(actualSize);
         msg.CopyFromNative(_recvBufferPtr, actualSize);
-
         return msg;
     }
 
