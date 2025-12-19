@@ -12,15 +12,21 @@ namespace Net.Zmq;
 public sealed class Message : IDisposable
 {
     private const int ZmqMsgSize = 64;
-    private readonly nint _msgPtr;
-    private bool _initialized;
-    private bool _disposed;
-    private bool _wasSuccessfullySent;
+    internal readonly nint _msgPtr;
+    internal bool _initialized;
+    internal bool _disposed;
+    internal bool _wasSuccessfullySent;
     internal nint _poolDataPtr = nint.Zero;     // 풀 반환을 위한 네이티브 포인터
     internal int _poolBucketIndex = -1;          // 풀의 버킷 인덱스
     internal int _poolActualSize = -1;           // 실제 할당된 크기
     internal bool _isPooled = false;             // 풀에서 할당된 메시지 여부
     internal MessagePool? _poolInstance = null;  // 이 메시지를 할당한 풀 인스턴스
+
+    // 재사용 가능한 Message 전용 필드
+    internal bool _isFromPool = false;                  // 풀에서 재사용되는 Message 객체 여부
+    internal Action<nint>? _reusableCallback = null;    // 재사용 가능한 콜백
+    internal int _callbackExecuted = 0;                 // 콜백 실행 여부 (0 or 1)
+    internal GCHandle _callbackHandle;                  // 콜백 GCHandle
 
     /// <summary>
     /// Initializes an empty message.
@@ -395,11 +401,76 @@ public sealed class Message : IDisposable
     }
 
     /// <summary>
+    /// 재사용을 위해 Message 상태를 초기화합니다.
+    /// zmq_msg_t를 다시 초기화하여 재사용 준비를 합니다.
+    /// </summary>
+    internal void PrepareForReuse()
+    {
+        _disposed = false;
+        _wasSuccessfullySent = false;
+        Interlocked.Exchange(ref _callbackExecuted, 0);
+
+        // zmq_msg_t를 다시 초기화 (재사용 준비)
+        // 이전에 close된 상태이므로 다시 init_data 호출
+        nint ffnPtr;
+        unsafe
+        {
+            ffnPtr = (nint)Message.FreeCallbackFunctionPointer;
+        }
+
+        var result = Core.Native.LibZmq.MsgInitDataPtr(
+            _msgPtr,
+            _poolDataPtr,
+            (nuint)_poolActualSize,
+            ffnPtr,
+            GCHandle.ToIntPtr(_callbackHandle));
+
+        if (result != 0)
+        {
+            throw new ZmqException();
+        }
+
+        _initialized = true;
+    }
+
+    /// <summary>
+    /// Message를 풀에 반환합니다 (휴면 상태로 표시).
+    /// 실제로는 아무것도 해제하지 않고 disposed 플래그만 설정합니다.
+    /// </summary>
+    internal void ReturnToPool()
+    {
+        _disposed = true;
+        // 중요: 아무것도 해제하지 않음! 리소스는 유지됨
+    }
+
+    /// <summary>
     /// Disposes the message and releases all associated resources.
     /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
+
+        // Pool 메시지 (재사용 가능): zmq_msg_close 호출하여 콜백 트리거
+        if (_isFromPool)
+        {
+            _disposed = true;
+
+            if (_initialized)
+            {
+                // zmq_msg_close를 호출하여 ZeroMQ free callback 트리거
+                // 콜백에서 풀에 반환됨
+                if (!_wasSuccessfullySent)
+                {
+                    LibZmq.MsgClosePtr(_msgPtr);
+                }
+                _initialized = false;
+            }
+
+            GC.SuppressFinalize(this);
+            return;
+        }
+
+        // 일반 메시지: 기존 로직대로 완전히 해제
         _disposed = true;
 
         if (_initialized)

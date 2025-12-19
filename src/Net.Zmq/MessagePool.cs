@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Net.Zmq;
@@ -118,6 +119,9 @@ public sealed class MessagePool
     private readonly ConcurrentStack<nint>[] _buffers;
     private readonly int[] _bucketCounts;
 
+    // 재사용 가능한 Message 객체 풀 (새로운 방식)
+    private readonly ConcurrentStack<Message>[] _pooledMessages;
+
     // Statistics
     private long _totalRents;
     private long _totalReturns;
@@ -131,10 +135,97 @@ public sealed class MessagePool
     {
         _buffers = new ConcurrentStack<nint>[BucketSizes.Length];
         _bucketCounts = new int[BucketSizes.Length];
+        _pooledMessages = new ConcurrentStack<Message>[BucketSizes.Length];
 
         for (int i = 0; i < _buffers.Length; i++)
         {
             _buffers[i] = new ConcurrentStack<nint>();
+            _pooledMessages[i] = new ConcurrentStack<Message>();
+        }
+    }
+
+    /// <summary>
+    /// Unmanaged callback function pointer for zmq_msg_init_data.
+    /// Uses UnmanagedCallersOnly for modern .NET P/Invoke.
+    /// </summary>
+    private static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> FreeCallbackFunctionPointer = &FreeCallbackImpl;
+
+    /// <summary>
+    /// ZeroMQ free callback 구현.
+    /// data 파라미터는 사용하지 않고, hint에 저장된 GCHandle을 통해 콜백을 실행합니다.
+    /// </summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void FreeCallbackImpl(nint data, nint hint)
+    {
+        if (hint == nint.Zero)
+            return;
+
+        try
+        {
+            var handle = GCHandle.FromIntPtr(hint);
+            var callback = handle.Target as Action<nint>;
+            callback?.Invoke(nint.Zero);
+            // 주의: GCHandle은 여기서 해제하지 않음 (Message가 재사용되므로)
+        }
+        catch
+        {
+            // Swallow exceptions in unmanaged callback
+        }
+    }
+
+    /// <summary>
+    /// 풀에서 재사용할 수 있는 Message를 생성합니다.
+    /// zmq_msg_t를 버킷 크기로 한 번만 초기화하고, 이후 재사용합니다.
+    /// </summary>
+    private Message CreatePooledMessage(int bucketSize, int bucketIndex)
+    {
+        var dataPtr = Marshal.AllocHGlobal(bucketSize);
+        var msg = new Message();
+
+        // 콜백 설정
+        msg._reusableCallback = (ptr) => ReturnMessageToPool(msg);
+        msg._callbackHandle = GCHandle.Alloc(msg._reusableCallback);
+
+        // zmq_msg_t를 버킷 크기로 한 번만 초기화!
+        nint ffnPtr;
+        unsafe
+        {
+            ffnPtr = (nint)FreeCallbackFunctionPointer;
+        }
+
+        var result = Core.Native.LibZmq.MsgInitDataPtr(
+            msg._msgPtr,
+            dataPtr,
+            (nuint)bucketSize,
+            ffnPtr,
+            GCHandle.ToIntPtr(msg._callbackHandle));
+
+        if (result != 0)
+        {
+            msg._callbackHandle.Free();
+            Marshal.FreeHGlobal(dataPtr);
+            throw new ZmqException();
+        }
+
+        msg._isFromPool = true;
+        msg._poolBucketIndex = bucketIndex;
+        msg._initialized = true;
+        msg._poolDataPtr = dataPtr;
+        msg._poolActualSize = bucketSize;
+
+        return msg;
+    }
+
+    /// <summary>
+    /// Message를 풀에 반환합니다.
+    /// </summary>
+    private void ReturnMessageToPool(Message msg)
+    {
+        if (Interlocked.CompareExchange(ref msg._callbackExecuted, 1, 0) == 0)
+        {
+            msg.ReturnToPool();
+            _pooledMessages[msg._poolBucketIndex].Push(msg);
+            Interlocked.Increment(ref _totalReturns);
         }
     }
 
@@ -230,16 +321,61 @@ public sealed class MessagePool
     }
 
     /// <summary>
-    /// 수신 작업을 위해 지정된 크기의 풀링된 메시지 버퍼를 대여합니다.
-    /// Socket.ReceiveWithPool()에 최적화되어 있으며, 데이터가 버퍼에 복사됩니다.
+    /// Message를 대여합니다.
+    /// withCallback=true: 재사용 가능한 방식 (빠름, 기본값)
+    /// withCallback=false: 기존 방식 (호환성, 수동 반환 필요)
     /// </summary>
-    /// <param name="size">할당할 버퍼 크기</param>
-    /// <param name="withCallback">
-    /// true: 전송 시 ZMQ가 자동으로 버퍼 반환 (resend 시나리오용)
-    /// false: Dispose() 후 반드시 MessagePool.Shared.Return(msg)를 호출해야 합니다.
-    /// </param>
-    /// <returns>풀링된 버퍼를 가진 Message</returns>
-    public Message Rent(int size, bool withCallback = false)
+    /// <param name="size">요청 크기</param>
+    /// <param name="withCallback">true: 재사용 가능 (기본값), false: 기존 방식</param>
+    /// <returns>Message</returns>
+    public Message Rent(int size, bool withCallback = true)
+    {
+        if (withCallback)
+        {
+            // 재사용 가능한 방식 (새로운 방식) - 빠름!
+            return RentReusable(size);
+        }
+        else
+        {
+            // 기존 방식 - 호환성
+            return RentLegacy(size, withCallback);
+        }
+    }
+
+    /// <summary>
+    /// 재사용 가능한 Message를 대여합니다 (새로운 방식).
+    /// Message 객체를 재사용하므로 매우 빠릅니다.
+    /// </summary>
+    private Message RentReusable(int size)
+    {
+        var bucketIndex = GetBucketIndex(size);
+
+        if (bucketIndex == -1)
+        {
+            // 크기가 너무 큼 - 기존 방식으로 폴백
+            return RentLegacy(size, true);
+        }
+
+        if (_pooledMessages[bucketIndex].TryPop(out var msg))
+        {
+            msg.PrepareForReuse();
+            Interlocked.Increment(ref _poolHits);
+            Interlocked.Increment(ref _totalRents);
+            return msg;
+        }
+
+        // 풀에 없으면 새로 생성
+        var bucketSize = GetBucketSize(bucketIndex);
+        var newMsg = CreatePooledMessage(bucketSize, bucketIndex);
+        Interlocked.Increment(ref _poolMisses);
+        Interlocked.Increment(ref _totalRents);
+        return newMsg;
+    }
+
+    /// <summary>
+    /// 기존 방식으로 Message를 대여합니다 (재사용 불가).
+    /// </summary>
+    private Message RentLegacy(int size, bool withCallback)
     {
         int bucketIndex = SelectBucket(size);
 
@@ -284,10 +420,26 @@ public sealed class MessagePool
         msg._poolDataPtr = nativePtr;
         msg._poolBucketIndex = bucketIndex;
         msg._poolActualSize = actualSize;
-        msg._isPooled = !withCallback;  // callback 없으면 풀 마킹
-        msg._poolInstance = this;  // 이 풀 인스턴스에서 할당됨
+        msg._isPooled = !withCallback;
+        msg._poolInstance = this;
 
         return msg;
+    }
+
+    /// <summary>
+    /// 버킷 인덱스를 반환합니다.
+    /// </summary>
+    private static int GetBucketIndex(int size)
+    {
+        return SelectBucket(size);
+    }
+
+    /// <summary>
+    /// 버킷 크기를 반환합니다.
+    /// </summary>
+    private static int GetBucketSize(int bucketIndex)
+    {
+        return BucketSizes[bucketIndex];
     }
 
     /// <summary>
@@ -614,6 +766,22 @@ public struct PoolStatistics
     /// Should be 0 at the end of benchmarks to ensure no leaks.
     /// </summary>
     public long OutstandingBuffers { get; init; }
+
+    // 하위 호환성을 위한 별칭 속성들
+    /// <summary>
+    /// Alias for TotalRents (for backward compatibility).
+    /// </summary>
+    public long Rents => TotalRents;
+
+    /// <summary>
+    /// Alias for TotalReturns (for backward compatibility).
+    /// </summary>
+    public long Returns => TotalReturns;
+
+    /// <summary>
+    /// Alias for OutstandingBuffers (for backward compatibility).
+    /// </summary>
+    public long OutstandingMessages => OutstandingBuffers;
 
     /// <summary>
     /// Pool hit rate (0.0 to 1.0).
