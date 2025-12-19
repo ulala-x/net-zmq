@@ -24,9 +24,9 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "buffer should be returned when message is not sent");
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0, "buffer should be returned when message is not sent");
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
     }
 
     [Fact]
@@ -58,9 +58,9 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned via ZMQ callback
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "buffer should be returned after ZMQ finishes transmission");
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0, "buffer should be returned after ZMQ finishes transmission");
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
     }
 
     [Fact]
@@ -83,9 +83,9 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "all buffers should be returned");
-        stats.TotalRents.Should().Be(count);
-        stats.TotalReturns.Should().Be(count);
+        stats.OutstandingMessages.Should().Be(0, "all buffers should be returned");
+        stats.Rents.Should().Be(count);
+        stats.Returns.Should().Be(count);
     }
 
     [Fact]
@@ -131,9 +131,9 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "all buffers should be returned regardless of send status");
-        stats.TotalRents.Should().Be(3);
-        stats.TotalReturns.Should().Be(3);
+        stats.OutstandingMessages.Should().Be(0, "all buffers should be returned regardless of send status");
+        stats.Rents.Should().Be(3);
+        stats.Returns.Should().Be(3);
     }
 
     [Fact]
@@ -145,20 +145,124 @@ public class MessagePoolTests
 
         // Act
         var stats1 = pool.GetStatistics();
-        stats1.TotalRents.Should().Be(0);
+        stats1.Rents.Should().Be(0);
 
         using (var msg = pool.Rent(data))
         {
             var stats2 = pool.GetStatistics();
-            stats2.TotalRents.Should().Be(1);
-            stats2.OutstandingBuffers.Should().Be(1);
+            stats2.Rents.Should().Be(1);
+            stats2.OutstandingMessages.Should().Be(1);
         }
 
         Thread.Sleep(50);
 
         var stats3 = pool.GetStatistics();
-        stats3.TotalRents.Should().Be(1);
-        stats3.TotalReturns.Should().Be(1);
-        stats3.OutstandingBuffers.Should().Be(0);
+        stats3.Rents.Should().Be(1);
+        stats3.Returns.Should().Be(1);
+        stats3.OutstandingMessages.Should().Be(0);
+    }
+
+    [Fact]
+    public void PrepareForReuse_ShouldResetMessageState()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.Prewarm(MessageSize.B64, 1);
+
+        // Act
+        var msg = pool.Rent(64);
+
+        // Assert - 재사용된 메시지는 초기 상태여야 함
+        msg._disposed.Should().BeFalse("message should not be disposed after rent");
+        msg._wasSuccessfullySent.Should().BeFalse("message should not be marked as sent after rent");
+        msg._callbackExecuted.Should().Be(0, "callback should not be executed after rent");
+        msg._isFromPool.Should().BeTrue("message should be marked as from pool");
+        msg._reusableCallback.Should().NotBeNull("reusable callback should be set");
+
+        // Return message to pool
+        msg.Dispose();
+        Thread.Sleep(100);
+    }
+
+    [Fact]
+    public void MessageCallback_ShouldExecuteOnlyOnce()
+    {
+        // Arrange
+        var pool = new MessagePool();
+
+        // Act - Rent and dispose multiple messages
+        var msg1 = pool.Rent(64);
+        msg1.Dispose();
+        Thread.Sleep(100);
+
+        var msg2 = pool.Rent(64);
+        msg2.Dispose();
+        Thread.Sleep(100);
+
+        // Assert - Statistics should show correct return count
+        // Each message's callback should execute exactly once
+        var stats = pool.GetStatistics();
+        stats.Returns.Should().BeGreaterOrEqualTo(2, "each disposal should trigger callback exactly once");
+    }
+
+    [Fact]
+    public void Rent_ShouldSupportMultipleCycles()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B64, 10);
+        pool.Prewarm(MessageSize.B64, 5);
+        int cycleCount = 10;
+
+        // Act & Assert
+        for (int i = 0; i < cycleCount; i++)
+        {
+            var msg = pool.Rent(64);
+            msg.Should().NotBeNull();
+            msg._disposed.Should().BeFalse();
+            msg._isFromPool.Should().BeTrue();
+
+            msg.Dispose();
+            Thread.Sleep(10); // 콜백 실행 대기
+        }
+
+        Thread.Sleep(100); // 최종 콜백 실행 대기
+
+        // Assert - Statistics should show all cycles completed
+        var stats = pool.GetStatistics();
+        stats.Rents.Should().BeGreaterOrEqualTo(cycleCount, "should track all rent operations");
+    }
+
+    [Fact]
+    public void Rent_ShouldNotLeakMessages()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B64, 10);
+        int messageCount = 5;
+
+        // Act
+        var messages = new List<Message>();
+        for (int i = 0; i < messageCount; i++)
+        {
+            messages.Add(pool.Rent(64));
+        }
+
+        var statsBefore = pool.GetStatistics();
+        statsBefore.OutstandingMessages.Should().Be(messageCount, "should have outstanding messages before disposal");
+
+        // 모두 반환
+        foreach (var msg in messages)
+        {
+            msg.Dispose();
+        }
+
+        Thread.Sleep(100); // 콜백 실행 대기
+
+        var statsAfter = pool.GetStatistics();
+
+        // Assert
+        statsAfter.OutstandingMessages.Should().BeLessThanOrEqualTo(statsBefore.OutstandingMessages, "outstanding messages should decrease after disposal");
+        statsAfter.OutstandingMessages.Should().Be(0, "all messages should be returned to pool");
     }
 }

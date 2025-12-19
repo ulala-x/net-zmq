@@ -51,9 +51,9 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned via callback
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "buffer should be returned via ZMQ callback");
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0, "buffer should be returned via ZMQ callback");
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
     }
 
     /// <summary>
@@ -85,9 +85,9 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned via callback
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "buffer should be returned via MsgClose callback");
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0, "buffer should be returned via MsgClose callback");
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
     }
 
     /// <summary>
@@ -116,9 +116,9 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned via Dispose
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "buffer should be returned via Dispose → ReturnInternal");
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0, "buffer should be returned via Dispose → ReturnInternal");
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
     }
 
     /// <summary>
@@ -149,8 +149,8 @@ public class MessagePoolDisposalTests
         msg.Dispose();
 
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0);
-        stats.TotalReturns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0);
+        stats.Returns.Should().Be(1);
     }
 
     /// <summary>
@@ -239,8 +239,8 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned via callback
         var statsAfter = pool.GetStatistics();
-        var rents = statsAfter.TotalRents - statsBefore.TotalRents;
-        var returns = statsAfter.TotalReturns - statsBefore.TotalReturns;
+        var rents = statsAfter.Rents - statsBefore.Rents;
+        var returns = statsAfter.Returns - statsBefore.Returns;
 
         rents.Should().Be(1, "should rent one buffer for received message");
         returns.Should().Be(1, "buffer should be returned after forwarding");
@@ -285,8 +285,8 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned via MsgClose callback
         var statsAfter = pool.GetStatistics();
-        var rents = statsAfter.TotalRents - statsBefore.TotalRents;
-        var returns = statsAfter.TotalReturns - statsBefore.TotalReturns;
+        var rents = statsAfter.Rents - statsBefore.Rents;
+        var returns = statsAfter.Returns - statsBefore.Returns;
 
         rents.Should().Be(1, "should rent one buffer");
         returns.Should().Be(1, "buffer should be returned via MsgClose callback");
@@ -328,8 +328,8 @@ public class MessagePoolDisposalTests
 
         // Assert - Buffer should be returned immediately via Dispose
         var statsAfter = pool.GetStatistics();
-        var rents = statsAfter.TotalRents - statsBefore.TotalRents;
-        var returns = statsAfter.TotalReturns - statsBefore.TotalReturns;
+        var rents = statsAfter.Rents - statsBefore.Rents;
+        var returns = statsAfter.Returns - statsBefore.Returns;
 
         rents.Should().Be(1, "should rent one buffer");
         returns.Should().Be(1, "buffer should be returned immediately via Dispose");
@@ -386,9 +386,9 @@ public class MessagePoolDisposalTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingBuffers.Should().Be(0, "all buffers should be returned via appropriate paths");
-        stats.TotalRents.Should().Be(4);
-        stats.TotalReturns.Should().Be(4);
+        stats.OutstandingMessages.Should().Be(0, "all buffers should be returned via appropriate paths");
+        stats.Rents.Should().Be(4);
+        stats.Returns.Should().Be(4);
     }
 
     /// <summary>
@@ -408,8 +408,8 @@ public class MessagePoolDisposalTests
 
         // Assert - Only one return should be recorded
         var stats = pool.GetStatistics();
-        stats.TotalRents.Should().Be(1);
-        stats.TotalReturns.Should().Be(1);
-        stats.OutstandingBuffers.Should().Be(0);
+        stats.Rents.Should().Be(1);
+        stats.Returns.Should().Be(1);
+        stats.OutstandingMessages.Should().Be(0);
     }
 }

@@ -37,16 +37,14 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 [GcServer(true)]
 public class RecvMethodComparisonBenchmarks
 {
-    [Params(64, 512, 1024, 65536)]
-    public int MessageSize { get; set; }
+    [Params(64, 512, 1024, 65536)] public int MessageSize { get; set; }
 
-    [Params(10000)]
-    public int MessageCount { get; set; }
+    [Params(10000)] public int MessageCount { get; set; }
 
     // Reusable buffers (allocated once in GlobalSetup)
-    private nint _sendDataPtr;               // Native memory for send data
-    private nint _recvBufferPtr;             // Native memory for Span receive
-    private nint _identityBufferPtr;         // Native memory for identity frame
+    private nint _sendDataPtr; // Native memory for send data
+    private nint _recvBufferPtr; // Native memory for Span receive
+    private nint _identityBufferPtr; // Native memory for identity frame
 
     // Socket infrastructure
     private Context _ctx = null!;
@@ -147,6 +145,7 @@ public class RecvMethodComparisonBenchmarks
                     n++;
                 }
             }
+
             countdown.Signal();
         });
         recvThread.Start();
@@ -179,124 +178,32 @@ public class RecvMethodComparisonBenchmarks
             while (n < MessageCount)
             {
                 // First message: blocking wait
-                using (var identityMsg = new Message())
-                {
-                    _router2.Recv(identityMsg);
-                }
+                _router2.Recv(_identityBufferPtr, 64);
+
                 using (var dataMsg = new Message())
                 {
                     _router2.Recv(dataMsg);
                     // Use dataMsg.Data here if needed
                 }
+
                 n++;
 
                 // Batch receive available messages
-                while (n < MessageCount)
+                while (n < MessageCount && _router2.Recv(_identityBufferPtr, 64, RecvFlags.DontWait) != -1)
                 {
-                    using var identityMsg = new Message();
-                    if (_router2.Recv(identityMsg, RecvFlags.DontWait) == -1)
-                        break;
-
                     using var dataMsg = new Message();
-                    _router2.Recv(dataMsg, RecvFlags.DontWait);
+                    _router2.Recv(dataMsg);
                     // Use dataMsg.Data here if needed
 
                     n++;
                 }
             }
+
             countdown.Signal();
         });
         recvThread.Start();
 
         // Sender (same as SpanRecv)
-        for (int i = 0; i < MessageCount; i++)
-        {
-            _router1.Send(_router2Id, SendFlags.SendMore);
-            _router1.Send(_sendDataPtr, MessageSize, SendFlags.DontWait);
-        }
-
-        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
-        {
-            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
-        }
-    }
-
-    /// <summary>
-    /// Send comparison: Send(ReadOnlySpan&lt;byte&gt;) - managed memory with pinning overhead.
-    /// Expected: Slightly slower due to managed memory pinning overhead.
-    /// </summary>
-    [Benchmark]
-    public void SpanSend_RouterToRouter()
-    {
-        var countdown = new CountdownEvent(1);
-        var recvThread = new Thread(() =>
-        {
-            int n = 0;
-            while (n < MessageCount)
-            {
-                // First message: blocking wait
-                _router2.Recv(_identityBufferPtr, 64);
-                _router2.Recv(_recvBufferPtr, MessageSize);
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBufferPtr, 64, RecvFlags.DontWait) != -1)
-                {
-                    _router2.Recv(_recvBufferPtr, MessageSize, RecvFlags.DontWait);
-                    n++;
-                }
-            }
-            countdown.Signal();
-        });
-        recvThread.Start();
-
-        // Sender: Use Span Send (managed memory)
-        unsafe
-        {
-            var sendSpan = new ReadOnlySpan<byte>((void*)_sendDataPtr, MessageSize);
-            for (int i = 0; i < MessageCount; i++)
-            {
-                _router1.Send(_router2Id, SendFlags.SendMore);
-                _router1.Send(sendSpan, SendFlags.DontWait);
-            }
-        }
-
-        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
-        {
-            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
-        }
-    }
-
-    /// <summary>
-    /// Send(nint, int) - native memory without pinning overhead.
-    /// Expected: Best performance due to zero pinning overhead and direct native memory access.
-    /// </summary>
-    [Benchmark]
-    public void NativeSend_RouterToRouter()
-    {
-        var countdown = new CountdownEvent(1);
-        var recvThread = new Thread(() =>
-        {
-            int n = 0;
-            while (n < MessageCount)
-            {
-                // First message: blocking wait
-                _router2.Recv(_identityBufferPtr, 64);
-                _router2.Recv(_recvBufferPtr, MessageSize);
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBufferPtr, 64, RecvFlags.DontWait) != -1)
-                {
-                    _router2.Recv(_recvBufferPtr, MessageSize, RecvFlags.DontWait);
-                    n++;
-                }
-            }
-            countdown.Signal();
-        });
-        recvThread.Start();
-
-        // Sender: Use native Send (native memory)
         for (int i = 0; i < MessageCount; i++)
         {
             _router1.Send(_router2Id, SendFlags.SendMore);

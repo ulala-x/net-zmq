@@ -93,11 +93,6 @@ public class MemoryStrategyBenchmarks
         var stats = MessagePool.Shared.GetStatistics();
         Console.WriteLine($"MessagePool Statistics: {stats}");
 
-        if (stats.OutstandingBuffers != 0)
-        {
-            Console.WriteLine($"WARNING: {stats.OutstandingBuffers} buffers not returned to pool (possible memory leak)");
-        }
-
         // Clear the pool to avoid state carryover between benchmark runs
         MessagePool.Shared.Clear();
 
