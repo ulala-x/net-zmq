@@ -115,11 +115,7 @@ public sealed class MessagePool
     /// </summary>
     public static MessagePool Shared { get; } = new();
 
-    // Native memory buffers organized by size bucket
-    private readonly ConcurrentStack<nint>[] _buffers;
-    private readonly int[] _bucketCounts;
-
-    // 재사용 가능한 Message 객체 풀 (새로운 방식)
+    // 재사용 가능한 Message 객체 풀
     private readonly ConcurrentStack<Message>[] _pooledMessages;
 
     // Statistics
@@ -133,13 +129,10 @@ public sealed class MessagePool
     /// </summary>
     public MessagePool()
     {
-        _buffers = new ConcurrentStack<nint>[BucketSizes.Length];
-        _bucketCounts = new int[BucketSizes.Length];
         _pooledMessages = new ConcurrentStack<Message>[BucketSizes.Length];
 
-        for (int i = 0; i < _buffers.Length; i++)
+        for (int i = 0; i < _pooledMessages.Length; i++)
         {
-            _buffers[i] = new ConcurrentStack<nint>();
             _pooledMessages[i] = new ConcurrentStack<Message>();
         }
     }
@@ -213,6 +206,11 @@ public sealed class MessagePool
         msg._poolDataPtr = dataPtr;
         msg._poolActualSize = bucketSize;
 
+        // 새로운 필드들 직접 초기화 (internal 필드이므로 직접 접근 가능)
+        // SetActualDataSize를 호출하기 전에 _bufferSize를 먼저 설정해야 함
+        msg._bufferSize = bucketSize;
+        msg._actualDataSize = bucketSize;  // 초기에는 전체 버킷 크기
+
         return msg;
     }
 
@@ -260,86 +258,38 @@ public sealed class MessagePool
     /// <returns>A Message instance that will automatically return the buffer to the pool.</returns>
     public Message Rent(ReadOnlySpan<byte> data)
     {
-        int size = data.Length;
-        int bucketIndex = SelectBucket(size);
+        int actualSize = data.Length;
 
-        nint nativePtr;
-        int actualSize;
+        // 1. 풀에서 재사용 가능한 메시지 가져오기
+        var msg = RentReusable(actualSize);
 
-        if (bucketIndex == -1 || !TryRentFromBucket(bucketIndex, out nativePtr))
-        {
-            // Pool miss: allocate new native memory
-            actualSize = bucketIndex >= 0 ? BucketSizes[bucketIndex] : size;
-            nativePtr = Marshal.AllocHGlobal(actualSize);
-            Interlocked.Increment(ref _poolMisses);
-        }
-        else
-        {
-            // Pool hit: reuse existing buffer
-            actualSize = BucketSizes[bucketIndex];
-            Interlocked.Increment(ref _poolHits);
-        }
-
-        Interlocked.Increment(ref _totalRents);
-
-        // Copy data to native memory
-        // unsafe
-        // {
-        //     var span = new Span<byte>((void*)nativePtr, size);
-        //     data.CopyTo(span);
-        // }
+        // 2. 데이터 복사 (버킷 크기 버퍼에 실제 데이터만 복사)
         unsafe
         {
             fixed (byte* srcPtr = data)
             {
-                Buffer.MemoryCopy(srcPtr, (void*)nativePtr, size, size);
+                Buffer.MemoryCopy(srcPtr, (void*)msg.DataPtr, actualSize, actualSize);
             }
         }
 
-        // Create zero-copy Message with free callback
-        var capturedSize = actualSize;
-        var capturedBucketIndex = bucketIndex;
-
-        // Thread-safe callback wrapper to ensure single execution
-        int callbackExecuted = 0;
-        var msg = new Message(nativePtr, size, ptr =>
+        // 3. 실제 데이터 크기 설정
+        if (msg._isFromPool)
         {
-            // Ensure callback executes only once (handles concurrent invocation)
-            if (Interlocked.CompareExchange(ref callbackExecuted, 1, 0) == 0)
-            {
-                Return(ptr, capturedSize, capturedBucketIndex);
-            }
-        });
-
-        msg._poolDataPtr = nativePtr;
-        msg._poolBucketIndex = bucketIndex;
-        msg._poolActualSize = actualSize;
-        msg._isPooled = false;  // callback이 있으므로 수동 반환 불필요
-        msg._poolInstance = this;  // 이 풀 인스턴스에서 할당됨
+            msg.SetActualDataSize(actualSize);
+        }
 
         return msg;
     }
 
     /// <summary>
     /// Message를 대여합니다.
-    /// withCallback=true: 재사용 가능한 방식 (빠름, 기본값)
-    /// withCallback=false: 기존 방식 (호환성, 수동 반환 필요)
+    /// Message 객체를 재사용하므로 매우 빠릅니다.
     /// </summary>
     /// <param name="size">요청 크기</param>
-    /// <param name="withCallback">true: 재사용 가능 (기본값), false: 기존 방식</param>
     /// <returns>Message</returns>
-    public Message Rent(int size, bool withCallback = true)
+    public Message Rent(int size)
     {
-        if (withCallback)
-        {
-            // 재사용 가능한 방식 (새로운 방식) - 빠름!
-            return RentReusable(size);
-        }
-        else
-        {
-            // 기존 방식 - 호환성
-            return RentLegacy(size, withCallback);
-        }
+        return RentReusable(size);
     }
 
     /// <summary>
@@ -352,16 +302,20 @@ public sealed class MessagePool
 
         if (bucketIndex == -1)
         {
-            // 크기가 너무 큼 - 기존 방식으로 폴백
-            return RentLegacy(size, true);
-        }
-
-        if (_pooledMessages[bucketIndex].TryPop(out var msg))
-        {
-            msg.PrepareForReuse();
-            Interlocked.Increment(ref _poolHits);
+            // 크기가 너무 큼 - 풀링하지 않고 일회용 Message 생성
+            var dataPtr = Marshal.AllocHGlobal(size);
+            var msg = new Message(dataPtr, size, ptr => Marshal.FreeHGlobal(ptr));
+            Interlocked.Increment(ref _poolMisses);
             Interlocked.Increment(ref _totalRents);
             return msg;
+        }
+
+        if (_pooledMessages[bucketIndex].TryPop(out var pooledMsg))
+        {
+            pooledMsg.PrepareForReuse();
+            Interlocked.Increment(ref _poolHits);
+            Interlocked.Increment(ref _totalRents);
+            return pooledMsg;
         }
 
         // 풀에 없으면 새로 생성
@@ -372,59 +326,6 @@ public sealed class MessagePool
         return newMsg;
     }
 
-    /// <summary>
-    /// 기존 방식으로 Message를 대여합니다 (재사용 불가).
-    /// </summary>
-    private Message RentLegacy(int size, bool withCallback)
-    {
-        int bucketIndex = SelectBucket(size);
-
-        nint nativePtr;
-        int actualSize;
-
-        if (bucketIndex == -1 || !TryRentFromBucket(bucketIndex, out nativePtr))
-        {
-            actualSize = bucketIndex >= 0 ? BucketSizes[bucketIndex] : size;
-            nativePtr = Marshal.AllocHGlobal(actualSize);
-            Interlocked.Increment(ref _poolMisses);
-        }
-        else
-        {
-            actualSize = BucketSizes[bucketIndex];
-            Interlocked.Increment(ref _poolHits);
-        }
-
-        Interlocked.Increment(ref _totalRents);
-
-        Message msg;
-
-        if (withCallback)
-        {
-            var capturedSize = actualSize;
-            var capturedBucketIndex = bucketIndex;
-            int callbackExecuted = 0;
-
-            msg = new Message(nativePtr, size, ptr =>
-            {
-                if (Interlocked.CompareExchange(ref callbackExecuted, 1, 0) == 0)
-                {
-                    Return(ptr, capturedSize, capturedBucketIndex);
-                }
-            });
-        }
-        else
-        {
-            msg = new Message(nativePtr, size, freeCallback: null);
-        }
-
-        msg._poolDataPtr = nativePtr;
-        msg._poolBucketIndex = bucketIndex;
-        msg._poolActualSize = actualSize;
-        msg._isPooled = !withCallback;
-        msg._poolInstance = this;
-
-        return msg;
-    }
 
     /// <summary>
     /// 버킷 인덱스를 반환합니다.
@@ -461,52 +362,7 @@ public sealed class MessagePool
         return -1;
     }
 
-    /// <summary>
-    /// Attempts to rent a buffer from the specified bucket.
-    /// </summary>
-    private bool TryRentFromBucket(int bucketIndex, out nint pointer)
-    {
-        if (_buffers[bucketIndex].TryPop(out pointer))
-        {
-            Interlocked.Decrement(ref _bucketCounts[bucketIndex]);
-            return true;
-        }
 
-        pointer = nint.Zero;
-        return false;
-    }
-
-    /// <summary>
-    /// Returns a native memory buffer to the pool or frees it if the pool is full.
-    /// Called by the Message free callback when ZMQ is done with the buffer.
-    /// </summary>
-    private void Return(nint pointer, int size, int bucketIndex)
-    {
-        if (pointer == nint.Zero)
-            return;
-
-        Interlocked.Increment(ref _totalReturns);
-
-        if (bucketIndex == -1)
-        {
-            // Not poolable: free immediately
-            Marshal.FreeHGlobal(pointer);
-            return;
-        }
-
-        // Check if bucket is full
-        int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
-        if (currentCount >= MaxBuffersPerBucket[bucketIndex])
-        {
-            // Pool is full: free the buffer
-            Marshal.FreeHGlobal(pointer);
-            return;
-        }
-
-        // Return to pool
-        Interlocked.Increment(ref _bucketCounts[bucketIndex]);
-        _buffers[bucketIndex].Push(pointer);
-    }
 
     /// <summary>
     /// Gets current pool statistics.
@@ -600,14 +456,13 @@ public sealed class MessagePool
                 continue;
 
             int bucketSize = BucketSizes[bucketIndex];
-            int currentCount = Volatile.Read(ref _bucketCounts[bucketIndex]);
+            int currentCount = _pooledMessages[bucketIndex].Count;
             int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - currentCount);
 
             for (int i = 0; i < toAllocate; i++)
             {
-                nint pointer = Marshal.AllocHGlobal(bucketSize);
-                _buffers[bucketIndex].Push(pointer);
-                Interlocked.Increment(ref _bucketCounts[bucketIndex]);
+                var msg = CreatePooledMessage(bucketSize, bucketIndex);
+                _pooledMessages[bucketIndex].Push(msg);
             }
         }
     }
@@ -618,38 +473,33 @@ public sealed class MessagePool
     /// </summary>
     public void Clear()
     {
-        for (int i = 0; i < _buffers.Length; i++)
+        for (int i = 0; i < _pooledMessages.Length; i++)
         {
-            while (_buffers[i].TryPop(out nint pointer))
+            while (_pooledMessages[i].TryPop(out var msg))
             {
-                Marshal.FreeHGlobal(pointer);
-                Interlocked.Decrement(ref _bucketCounts[i]);
+                // GCHandle 해제
+                if (msg._callbackHandle.IsAllocated)
+                {
+                    msg._callbackHandle.Free();
+                }
+
+                // 네이티브 메모리 해제
+                if (msg._poolDataPtr != nint.Zero)
+                {
+                    Marshal.FreeHGlobal(msg._poolDataPtr);
+                    msg._poolDataPtr = nint.Zero;
+                }
+
+                // zmq_msg_t 종료
+                if (msg._initialized)
+                {
+                    Core.Native.LibZmq.MsgClosePtr(msg._msgPtr);
+                    msg._initialized = false;
+                }
             }
         }
     }
 
-    /// <summary>
-    /// 풀링된 Message 버퍼를 내부적으로 풀에 반환합니다.
-    /// Message.Dispose()에서 자동으로 호출되므로 직접 호출할 필요가 없습니다.
-    ///
-    /// 이 메서드는 멱등성을 가집니다 - 여러 번 호출하거나
-    /// callback을 통한 자동 반환 후에 호출해도 안전합니다
-    /// (CompareExchange를 사용하여 단일 실행 보장).
-    /// </summary>
-    /// <param name="msg">풀에 반환할 Message</param>
-    internal void ReturnInternal(Message msg)
-    {
-        if (msg._poolBucketIndex == -1)
-            return;
-
-        // 중복 반환 방지: 원자적으로 _poolDataPtr 제거
-        var dataPtr = Interlocked.Exchange(ref msg._poolDataPtr, nint.Zero);
-        if (dataPtr == nint.Zero)
-            return;
-
-        // 버퍼를 풀에 반환
-        Return(dataPtr, msg._poolActualSize, msg._poolBucketIndex);
-    }
 
     /// <summary>
     /// Sets the maximum number of buffers for a specific bucket size.

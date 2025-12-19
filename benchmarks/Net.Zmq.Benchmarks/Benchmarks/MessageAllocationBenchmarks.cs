@@ -17,7 +17,7 @@ public class MessageAllocationBenchmarks
     [Params(MessageSize.B64, MessageSize.B512, MessageSize.K1, MessageSize.K64,Zmq.MessageSize.M1)]
     public MessageSize MessageSize { get; set; }
 
-    private byte[] _sourceArraay;
+    private byte[] _sourceArray = null!;
 
     [Params(1000)]
     public int MessageCount { get; set; }
@@ -29,7 +29,7 @@ public class MessageAllocationBenchmarks
         MessagePool.Shared.SetMaxBuffers(MessageSize, 1000);
         MessagePool.Shared.Prewarm(MessageSize, 1000);
         Console.WriteLine($"Pre-warmed MessagePool with 1000 buffers of size {MessageSize}");
-        _sourceArraay = new byte[(int)MessageSize];
+        _sourceArray = new byte[(int)MessageSize];
     }
 
     [GlobalCleanup]
@@ -63,52 +63,34 @@ public class MessageAllocationBenchmarks
     }
 
     /// <summary>
-    /// MessagePool.Rent with callback (automatic return after send).
-    /// Reuses native memory from pool, callback-based return.
+    /// MessagePool.Rent (size only).
+    /// Reuses native memory from pool, buffer is automatically returned on dispose.
     /// Expected: Faster due to memory reuse, minimal allocations.
     /// </summary>
     [Benchmark]
-    public void PoolRent_WithCallback()
+    public void PoolRent_SizeOnly()
     {
         List<Message> msgList = new List<Message>();
         for (int i = 0; i < MessageCount; i++)
         {
-            using var msg = MessagePool.Shared.Rent((int)MessageSize, withCallback: true);
-            msgList.Add(msg);
-            // Message is disposed, but buffer is NOT returned (callback-based)
-            // In real scenario, buffer is returned via ZMQ free callback after send
-        }
-
-        // Manually return all buffers since we didn't actually send
-        // This simulates the callback return that would happen after send
-        //MessagePool.Shared.Clear();
-        //MessagePool.Shared.Prewarm(MessageSize, 800);
-    }
-
-    /// <summary>
-    /// MessagePool.Rent without callback (manual return on dispose).
-    /// Reuses native memory from pool, dispose-based return.
-    /// Expected: Faster than NewMessage, slightly slower than WithCallback due to return overhead.
-    /// </summary>
-    [Benchmark]
-    public void PoolRent_NoCallback()
-    {
-        List<Message> msgList = new List<Message>();
-        for (int i = 0; i < MessageCount; i++)
-        {
-            using var msg = MessagePool.Shared.Rent((int)MessageSize, withCallback: false);
+            using var msg = MessagePool.Shared.Rent((int)MessageSize);
             msgList.Add(msg);
             // Message is disposed and buffer is automatically returned to pool
         }
     }
 
+    /// <summary>
+    /// MessagePool.Rent with data (ReadOnlySpan).
+    /// Reuses native memory from pool and copies data, buffer is automatically returned on dispose.
+    /// Expected: Faster than NewMessage due to pooling, but includes copy overhead.
+    /// </summary>
     [Benchmark]
-    public void PoolRent_withSpan()
+    public void PoolRent_WithData()
     {
         List<Message> msgList = new List<Message>();
         for (int i = 0; i < MessageCount; i++)
         {
-            using var msg = MessagePool.Shared.Rent(_sourceArraay);
+            using var msg = MessagePool.Shared.Rent(_sourceArray);
             msgList.Add(msg);
             // Message is disposed and buffer is automatically returned to pool
         }

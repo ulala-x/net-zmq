@@ -19,14 +19,16 @@ public sealed class Message : IDisposable
     internal nint _poolDataPtr = nint.Zero;     // 풀 반환을 위한 네이티브 포인터
     internal int _poolBucketIndex = -1;          // 풀의 버킷 인덱스
     internal int _poolActualSize = -1;           // 실제 할당된 크기
-    internal bool _isPooled = false;             // 풀에서 할당된 메시지 여부
-    internal MessagePool? _poolInstance = null;  // 이 메시지를 할당한 풀 인스턴스
 
     // 재사용 가능한 Message 전용 필드
     internal bool _isFromPool = false;                  // 풀에서 재사용되는 Message 객체 여부
     internal Action<nint>? _reusableCallback = null;    // 재사용 가능한 콜백
     internal int _callbackExecuted = 0;                 // 콜백 실행 여부 (0 or 1)
     internal GCHandle _callbackHandle;                  // 콜백 GCHandle
+
+    // 새로운 필드: 실제 데이터 크기와 버퍼 크기 추적
+    internal int _actualDataSize;  // 실제 데이터 크기 (예: 64 bytes)
+    internal int _bufferSize;      // 전체 버퍼 크기 (예: 1024 bytes, 버킷 크기)
 
     /// <summary>
     /// Initializes an empty message.
@@ -38,6 +40,8 @@ public sealed class Message : IDisposable
         var result = LibZmq.MsgInitPtr(_msgPtr);
         ZmqException.ThrowIfError(result);
         _initialized = true;
+        _actualDataSize = 0;
+        _bufferSize = 0;
     }
 
     /// <summary>
@@ -54,6 +58,8 @@ public sealed class Message : IDisposable
         var result = LibZmq.MsgInitSizePtr(_msgPtr, (nuint)size);
         ZmqException.ThrowIfError(result);
         _initialized = true;
+        _actualDataSize = size;
+        _bufferSize = size;
     }
 
     private void ClearMemory()
@@ -126,6 +132,8 @@ public sealed class Message : IDisposable
         }
 
         _initialized = true;
+        _actualDataSize = size;
+        _bufferSize = size;
     }
 
     /// <summary>
@@ -165,6 +173,7 @@ public sealed class Message : IDisposable
 
     /// <summary>
     /// Gets a span to the message data.
+    /// For pooled messages, returns a span of the actual data size, not the buffer size.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if the message is not initialized.</exception>
     public Span<byte> Data
@@ -172,6 +181,14 @@ public sealed class Message : IDisposable
         get
         {
             EnsureInitialized();
+
+            // Pooled 메시지의 경우 _poolDataPtr과 _actualDataSize 사용
+            if (_isFromPool && _poolDataPtr != nint.Zero)
+            {
+                unsafe { return new Span<byte>((void*)_poolDataPtr, _actualDataSize); }
+            }
+
+            // 일반 메시지의 경우 기존 방식 사용
             var ptr = LibZmq.MsgDataPtr(_msgPtr);
             var size = (int)LibZmq.MsgSizePtr(_msgPtr);
             unsafe { return new Span<byte>((void*)ptr, size); }
@@ -180,6 +197,7 @@ public sealed class Message : IDisposable
 
     /// <summary>
     /// Gets the size of the message in bytes.
+    /// For pooled messages, returns the actual data size, not the buffer size.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if the message is not initialized.</exception>
     public int Size
@@ -187,7 +205,40 @@ public sealed class Message : IDisposable
         get
         {
             EnsureInitialized();
+
+            // Pooled 메시지의 경우 _actualDataSize 반환
+            if (_isFromPool && _poolDataPtr != nint.Zero)
+            {
+                return _actualDataSize;
+            }
+
+            // 일반 메시지의 경우 zmq_msg_size 사용
             return (int)LibZmq.MsgSizePtr(_msgPtr);
+        }
+    }
+
+    /// <summary>
+    /// Gets the actual data size in bytes.
+    /// For pooled messages, this may be smaller than the buffer size.
+    /// </summary>
+    public int ActualSize => _isFromPool ? _actualDataSize : Size;
+
+    /// <summary>
+    /// Gets the allocated buffer size in bytes.
+    /// For pooled messages, this is the bucket size. For regular messages, same as ActualSize.
+    /// </summary>
+    public int BufferSize => _isFromPool ? _bufferSize : Size;
+
+    /// <summary>
+    /// Gets a pointer to the message data.
+    /// For internal use only.
+    /// </summary>
+    internal nint DataPtr
+    {
+        get
+        {
+            EnsureInitialized();
+            return _isFromPool && _poolDataPtr != nint.Zero ? _poolDataPtr : LibZmq.MsgDataPtr(_msgPtr);
         }
     }
 
@@ -337,6 +388,12 @@ public sealed class Message : IDisposable
             // Direct native-to-native memory copy - most efficient
             NativeMemory.Copy((void*)sourcePtr, (void*)_poolDataPtr, (nuint)size);
         }
+
+        // 실제 데이터 크기 설정
+        if (_isFromPool)
+        {
+            _actualDataSize = size;
+        }
     }
 
     /// <summary>
@@ -345,28 +402,33 @@ public sealed class Message : IDisposable
     /// <param name="socket">The socket handle.</param>
     /// <param name="flags">Send flags.</param>
     /// <returns>The number of bytes sent.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if the message is not initialized or if attempting to send a pooled message without callback.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if the message is not initialized.</exception>
     /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
     internal int Send(nint socket, SendFlags flags)
     {
         EnsureInitialized();
 
-        // Prevent sending pooled messages without callback (received with resend=false)
-        // These messages are meant for consumption only, not forwarding
-        if (_isPooled && _poolDataPtr != nint.Zero)
+        int result;
+
+        if (_isFromPool && _poolDataPtr != nint.Zero)
         {
-            throw new InvalidOperationException(
-                "Cannot send a pooled message that was received with resend=false. " +
-                "If you need to forward received messages, use ReceiveWithPool(resend: true) " +
-                "which will automatically return the buffer to the pool after transmission.");
+            // Pooled 메시지: zmq_send로 실제 크기만 전송
+            // 이렇게 하면 버킷 크기(예: 1024)가 아닌 실제 데이터 크기(예: 64)만 전송됨
+            result = LibZmq.Send(socket, _poolDataPtr, (nuint)_actualDataSize, (int)flags);
+            ZmqException.ThrowIfError(result);
+            _wasSuccessfullySent = true;
+
+            // 콜백 호출 (풀에 반환)
+            // zmq_send는 zmq_msg_send와 달리 콜백을 자동으로 호출하지 않으므로 수동 호출
+            _reusableCallback?.Invoke(nint.Zero);
         }
-
-        var result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
-        ZmqException.ThrowIfError(result);
-
-        // Mark as successfully sent - ZMQ now owns this message
-        // Do NOT call zmq_msg_close() in Dispose() for sent messages
-        _wasSuccessfullySent = true;
+        else
+        {
+            // 일반 메시지: zmq_msg_send 사용 (기존 방식)
+            result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
+            ZmqException.ThrowIfError(result);
+            _wasSuccessfullySent = true;
+        }
 
         return result;
     }
@@ -402,7 +464,7 @@ public sealed class Message : IDisposable
 
     /// <summary>
     /// 재사용을 위해 Message 상태를 초기화합니다.
-    /// zmq_msg_t를 다시 초기화하여 재사용 준비를 합니다.
+    /// 플래그만 리셋하고 zmq_msg_t는 그대로 재사용합니다 (이미 초기화되어 있음).
     /// </summary>
     internal void PrepareForReuse()
     {
@@ -410,27 +472,33 @@ public sealed class Message : IDisposable
         _wasSuccessfullySent = false;
         Interlocked.Exchange(ref _callbackExecuted, 0);
 
-        // zmq_msg_t를 다시 초기화 (재사용 준비)
-        // 이전에 close된 상태이므로 다시 init_data 호출
-        nint ffnPtr;
-        unsafe
+        // 리셋 시 전체 버퍼 사용 가능하도록 설정
+        if (_isFromPool && _poolDataPtr != nint.Zero)
         {
-            ffnPtr = (nint)Message.FreeCallbackFunctionPointer;
+            _actualDataSize = _bufferSize;
         }
 
-        var result = Core.Native.LibZmq.MsgInitDataPtr(
-            _msgPtr,
-            _poolDataPtr,
-            (nuint)_poolActualSize,
-            ffnPtr,
-            GCHandle.ToIntPtr(_callbackHandle));
+        // 중요: zmq_msg_t는 이미 초기화되어 있으므로 재초기화하지 않음!
+        // CreatePooledMessage()에서 한 번만 초기화했고, 그대로 재사용
+    }
 
-        if (result != 0)
-        {
-            throw new ZmqException();
-        }
+    /// <summary>
+    /// Pooled 메시지의 실제 데이터 크기를 설정합니다.
+    /// </summary>
+    /// <param name="size">실제 데이터 크기</param>
+    /// <exception cref="ArgumentException">실제 크기가 버퍼 크기를 초과하는 경우</exception>
+    internal void SetActualDataSize(int size)
+    {
+        if (!_isFromPool)
+            throw new InvalidOperationException("SetActualDataSize can only be called on pooled messages");
 
-        _initialized = true;
+        if (size > _bufferSize)
+            throw new ArgumentException($"Actual size ({size}) cannot exceed buffer size ({_bufferSize})");
+
+        if (size < 0)
+            throw new ArgumentException("Size cannot be negative", nameof(size));
+
+        _actualDataSize = size;
     }
 
     /// <summary>
@@ -450,21 +518,22 @@ public sealed class Message : IDisposable
     {
         if (_disposed) return;
 
-        // Pool 메시지 (재사용 가능): zmq_msg_close 호출하여 콜백 트리거
+        // Pool 메시지 (재사용 가능): 콜백만 호출하고 zmq_msg_t는 닫지 않음
         if (_isFromPool)
         {
             _disposed = true;
 
-            if (_initialized)
+            // Send()로 보내지지 않은 경우에만 콜백을 수동으로 호출
+            // Send()로 보낸 경우는 ZMQ가 자동으로 콜백을 호출함
+            if (!_wasSuccessfullySent)
             {
-                // zmq_msg_close를 호출하여 ZeroMQ free callback 트리거
-                // 콜백에서 풀에 반환됨
-                if (!_wasSuccessfullySent)
-                {
-                    LibZmq.MsgClosePtr(_msgPtr);
-                }
-                _initialized = false;
+                // 중요: zmq_msg_close() 대신 콜백 직접 호출
+                // zmq_msg_t는 초기화된 상태로 유지되어 재사용됨
+                _reusableCallback?.Invoke(nint.Zero);
             }
+
+            // _initialized는 true로 유지 - zmq_msg_t는 계속 초기화된 상태
+            // zmq_msg_close() 호출하지 않음!
 
             GC.SuppressFinalize(this);
             return;
@@ -487,17 +556,16 @@ public sealed class Message : IDisposable
 
         Marshal.FreeHGlobal(_msgPtr);
 
-        // 풀링된 메시지면 자동으로 풀에 반환
-        if (_isPooled && _poolDataPtr != nint.Zero && _poolInstance != null)
-        {
-            _poolInstance.ReturnInternal(this);
-        }
-
         GC.SuppressFinalize(this);
     }
 
     ~Message()
     {
+        // Pool 메시지는 Finalizer에서 처리하지 않음 (Dispose에서 GC.SuppressFinalize 호출됨)
+        // 만약 Finalizer가 호출되었다면 버그이므로 아무것도 해제하지 않음
+        if (_isFromPool)
+            return;
+
         // Only free unmanaged memory if not already disposed
         if (!_disposed)
         {
@@ -508,12 +576,6 @@ public sealed class Message : IDisposable
                 LibZmq.MsgClosePtr(_msgPtr);
             }
             Marshal.FreeHGlobal(_msgPtr);
-
-            // 풀링된 메시지면 자동으로 풀에 반환
-            if (_isPooled && _poolDataPtr != nint.Zero && _poolInstance != null)
-            {
-                _poolInstance.ReturnInternal(this);
-            }
         }
     }
 }
