@@ -404,6 +404,21 @@ public sealed class MessagePool
     }
 
     /// <summary>
+    /// Gets the current number of buffers in each pool bucket.
+    /// This shows how many Message objects are actually pooled and ready for reuse.
+    /// </summary>
+    /// <returns>Dictionary mapping bucket sizes to their current pool counts.</returns>
+    public Dictionary<int, int> GetPoolCounts()
+    {
+        var counts = new Dictionary<int, int>();
+        for (int i = 0; i < BucketSizes.Length; i++)
+        {
+            counts[BucketSizes[i]] = _pooledMessages[i].Count;
+        }
+        return counts;
+    }
+
+    /// <summary>
     /// Pre-warms the pool by allocating buffers for a specific message size.
     /// </summary>
     /// <param name="size">Message size to pre-warm.</param>
