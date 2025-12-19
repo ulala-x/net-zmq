@@ -1653,4 +1653,101 @@ public class MessagePoolTests
             "double disposal should not return message twice");
         statsAfterSecondDispose.OutstandingBuffers.Should().Be(0);
     }
+
+    // ======================
+    // H. Optimized ReceiveWithPool Tests (Direct Receive, No Copy)
+    // ======================
+
+    [Fact]
+    public async Task ReceiveWithPool_LargeMessages_NoExtraCopy()
+    {
+        // Arrange - Test that large messages don't incur extra copy overhead
+        var ctx = new Context();
+        var push = new Socket(ctx, SocketType.Push);
+        var pull = new Socket(ctx, SocketType.Pull);
+
+        push.Bind("inproc://perf-test");
+        pull.Connect("inproc://perf-test");
+        await Task.Delay(100);
+
+        const int messageSize = 64 * 1024; // 64KB
+        var sourceData = new byte[messageSize];
+        Array.Fill(sourceData, (byte)'X');
+
+        // Act - Send and receive
+        push.Send(sourceData);
+        await Task.Delay(50);
+
+        using var receivedMsg = pull.ReceiveWithPool();
+
+        // Assert
+        receivedMsg.Should().NotBeNull();
+        receivedMsg!.Size.Should().Be(messageSize, "actual size should be set correctly");
+        receivedMsg._isFromPool.Should().BeTrue();
+        receivedMsg._actualDataSize.Should().Be(messageSize);
+
+        // Verify data integrity
+        receivedMsg.Data.ToArray().Should().Equal(sourceData);
+
+        push.Dispose();
+        pull.Dispose();
+        ctx.Dispose();
+    }
+
+    [Fact]
+    public async Task ReceiveWithPool_SmallMessages_CorrectSize()
+    {
+        // Arrange - Test that small messages work correctly with max-size buffer
+        var ctx = new Context();
+        var push = new Socket(ctx, SocketType.Push);
+        var pull = new Socket(ctx, SocketType.Pull);
+
+        push.Bind("inproc://small-test");
+        pull.Connect("inproc://small-test");
+        await Task.Delay(100);
+
+        const int messageSize = 64; // Small message
+        var sourceData = new byte[messageSize];
+        Array.Fill(sourceData, (byte)'S');
+
+        // Act
+        push.Send(sourceData);
+        await Task.Delay(50);
+
+        using var receivedMsg = pull.ReceiveWithPool();
+
+        // Assert - Should receive correct small size, not MaxRecvBufferSize
+        receivedMsg.Should().NotBeNull();
+        receivedMsg!.Size.Should().Be(messageSize, "should return actual small size, not buffer size");
+        receivedMsg.Data.Length.Should().Be(messageSize);
+        receivedMsg.Data.ToArray().Should().Equal(sourceData);
+
+        push.Dispose();
+        pull.Dispose();
+        ctx.Dispose();
+    }
+
+    [Fact]
+    public async Task ReceiveWithPool_ErrorHandling_ReturnsToPool()
+    {
+        // Arrange - Test that Message is returned to pool on error
+        var pool = MessagePool.Shared;
+        var statsBefore = pool.GetStatistics();
+
+        var ctx = new Context();
+        var socket = new Socket(ctx, SocketType.Pull);
+        socket.Bind("inproc://error-test");
+
+        // Act - Try to receive with DontWait (should return null)
+        var msg = socket.ReceiveWithPool(RecvFlags.DontWait);
+
+        // Assert - Message should be null and returned to pool
+        msg.Should().BeNull("no message available");
+
+        var statsAfter = pool.GetStatistics();
+        statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers");
+
+        socket.Dispose();
+        ctx.Dispose();
+    }
 }
