@@ -512,6 +512,43 @@ public sealed class Message : IDisposable
     }
 
     /// <summary>
+    /// Pooled 메시지를 풀에 반환하지 않고 실제로 dispose합니다.
+    /// maxBuffer 초과 시 호출됩니다.
+    /// </summary>
+    internal void DisposePooledMessage()
+    {
+        if (!_isFromPool)
+            throw new InvalidOperationException("This method is only for pooled messages");
+
+        // GCHandle 해제
+        if (_callbackHandle.IsAllocated)
+        {
+            _callbackHandle.Free();
+        }
+
+        // zmq_msg_t 닫기
+        if (_initialized)
+        {
+            LibZmq.MsgClosePtr(_msgPtr);
+            _initialized = false;
+        }
+
+        // 네이티브 메모리 해제
+        if (_poolDataPtr != nint.Zero)
+        {
+            Marshal.FreeHGlobal(_poolDataPtr);
+            _poolDataPtr = nint.Zero;
+        }
+
+        if (_msgPtr != nint.Zero)
+        {
+            Marshal.FreeHGlobal(_msgPtr);
+        }
+
+        _disposed = true;
+    }
+
+    /// <summary>
     /// Disposes the message and releases all associated resources.
     /// </summary>
     public void Dispose()

@@ -1419,4 +1419,238 @@ public class MessagePoolTests
         msg.Dispose();
         Thread.Sleep(50);
     }
+
+    // ======================
+    // G. MaxBuffer Bug Fix Tests (Interlocked Counters)
+    // ======================
+
+    [Fact]
+    public void Dispose_WhenMaxBufferExceeded_ActuallyDisposesMessage()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B64, 2); // Limit to 2 buffers
+        pool.Prewarm(MessageSize.B64, 2); // Fill the pool to max
+
+        var statsBefore = pool.GetStatistics();
+
+        // Act - Rent 3 messages WITHOUT disposing them first, then dispose all at once
+        // This will cause pool to fill up when returning
+        var msg1 = pool.Rent(64);
+        var msg2 = pool.Rent(64);
+        var msg3 = pool.Rent(64); // This creates a new message since pool only had 2
+
+        // Now pool is empty (counter = 0). When we dispose all 3, only 2 can return
+        msg1.Dispose();
+        Thread.Sleep(50);
+
+        msg2.Dispose();
+        Thread.Sleep(50);
+
+        msg3.Dispose(); // This should be rejected since pool is already at maxBuffer (2/2)
+        Thread.Sleep(100);
+
+        // Assert
+        var statsAfter = pool.GetStatistics();
+        statsAfter.PoolRejects.Should().BeGreaterThan(0, "messages beyond maxBuffer should be rejected");
+        statsAfter.OutstandingBuffers.Should().Be(0, "all messages should be accounted for");
+    }
+
+    [Fact]
+    public void SetMaxBuffers_DynamicChange_AppliesImmediately()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B128, 5);
+        pool.Prewarm(MessageSize.B128, 5); // Pool has 5 messages
+
+        // Act - Change maxBuffer to 3 (smaller than current pool size of 5)
+        pool.SetMaxBuffers(MessageSize.B128, 3);
+
+        // Rent all 5 messages from pool
+        var msg1 = pool.Rent(128);
+        var msg2 = pool.Rent(128);
+        var msg3 = pool.Rent(128);
+        var msg4 = pool.Rent(128);
+        var msg5 = pool.Rent(128);
+
+        // Now dispose them all - only first 3 should be accepted (new maxBuffer = 3)
+        msg1.Dispose();
+        Thread.Sleep(50);
+        msg2.Dispose();
+        Thread.Sleep(50);
+        msg3.Dispose();
+        Thread.Sleep(50);
+        msg4.Dispose(); // Should be rejected (pool is 3/3)
+        Thread.Sleep(50);
+        msg5.Dispose(); // Should be rejected (pool is 3/3)
+        Thread.Sleep(100);
+
+        var stats = pool.GetStatistics();
+
+        // Assert - Should reject messages 4 and 5 because pool limit is now 3
+        stats.PoolRejects.Should().BeGreaterOrEqualTo(2, "dynamic maxBuffer change should apply immediately");
+        stats.OutstandingBuffers.Should().Be(0);
+    }
+
+    [Fact]
+    public void Dispose_MaxBufferExceeded_ReleasesNativeMemory()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B256, 1);
+        pool.Prewarm(MessageSize.B256, 1); // Fill pool to max
+
+        var statsBefore = pool.GetStatistics();
+
+        // Act - Rent 2 messages (pool had 1, so creates 1 new)
+        var msg1 = pool.Rent(256);
+        var msg2 = pool.Rent(256);
+
+        // Dispose both - first returns to pool, second should be rejected
+        msg1.Dispose();
+        Thread.Sleep(50);
+
+        msg2.Dispose(); // This should be rejected since pool is 1/1
+        Thread.Sleep(100);
+
+        var statsAfter = pool.GetStatistics();
+
+        // Assert - Message should be rejected and memory freed
+        statsAfter.PoolRejects.Should().BeGreaterThan(statsBefore.PoolRejects, "message should be rejected");
+        statsAfter.OutstandingBuffers.Should().Be(0, "no memory leaks");
+
+        // Note: We can't directly verify native memory was freed, but PoolRejects increment confirms
+        // that DisposePooledMessage() was called
+    }
+
+    [Fact]
+    public async Task Dispose_Concurrent_MaxBufferRespected()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.B512, 10); // Limit to 10 buffers
+        pool.Prewarm(MessageSize.B512, 5);
+
+        int threadCount = 20;
+        int messagesPerThread = 5;
+        var tasks = new List<Task>();
+
+        // Act - Multiple threads concurrently renting and disposing
+        for (int t = 0; t < threadCount; t++)
+        {
+            tasks.Add(Task.Run(() =>
+            {
+                for (int i = 0; i < messagesPerThread; i++)
+                {
+                    var msg = pool.Rent(512);
+                    Thread.Sleep(1); // Small delay to increase contention
+                    msg.Dispose();
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+        Thread.Sleep(500); // Wait for all callbacks
+
+        // Assert
+        var stats = pool.GetStatistics();
+        stats.OutstandingBuffers.Should().Be(0, "no leaked messages");
+
+        // With maxBuffer=10 and 100 total messages, we should see many rejects
+        stats.PoolRejects.Should().BeGreaterThan(0, "concurrent disposal should respect maxBuffer");
+    }
+
+    [Fact]
+    public void Prewarm_WithDispose_RespectsMaxBuffer()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        pool.SetMaxBuffers(MessageSize.K1, 5);
+
+        // Act - Prewarm to exactly maxBuffer
+        pool.Prewarm(MessageSize.K1, 5); // Pool has 5 messages
+
+        var statsAfterPrewarm = pool.GetStatistics();
+
+        // Rent 6 messages (5 from pool + 1 newly created)
+        var msg1 = pool.Rent(1024);
+        var msg2 = pool.Rent(1024);
+        var msg3 = pool.Rent(1024);
+        var msg4 = pool.Rent(1024);
+        var msg5 = pool.Rent(1024);
+        var msg6 = pool.Rent(1024); // New message
+
+        // Dispose all 6 - only 5 should be accepted
+        msg1.Dispose();
+        Thread.Sleep(50);
+        msg2.Dispose();
+        Thread.Sleep(50);
+        msg3.Dispose();
+        Thread.Sleep(50);
+        msg4.Dispose();
+        Thread.Sleep(50);
+        msg5.Dispose();
+        Thread.Sleep(50);
+        msg6.Dispose(); // This should be rejected (pool is 5/5)
+        Thread.Sleep(100);
+
+        var statsAfterDispose = pool.GetStatistics();
+
+        // Assert
+        statsAfterDispose.PoolRejects.Should().BeGreaterThan(0, "disposal after prewarm should respect maxBuffer");
+        statsAfterDispose.OutstandingBuffers.Should().Be(0);
+    }
+
+    [Fact]
+    public void SetMaxBuffers_Zero_ThrowsException()
+    {
+        // Arrange
+        var pool = new MessagePool();
+
+        // Act & Assert
+        Action act = () => pool.SetMaxBuffers(MessageSize.K2, 0);
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*must be positive*");
+    }
+
+    [Fact]
+    public void SetMaxBuffers_Negative_ThrowsException()
+    {
+        // Arrange
+        var pool = new MessagePool();
+
+        // Act & Assert
+        Action act = () => pool.SetMaxBuffers(MessageSize.K4, -5);
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*must be positive*");
+    }
+
+    [Fact]
+    public void Dispose_AlreadyDisposedPooledMessage_DoesNotReturnToPool()
+    {
+        // Arrange
+        var pool = new MessagePool();
+        var msg = pool.Rent(64);
+
+        var statsBeforeFirstDispose = pool.GetStatistics();
+
+        // Act - First disposal
+        msg.Dispose();
+        Thread.Sleep(100);
+
+        var statsAfterFirstDispose = pool.GetStatistics();
+        var returnsAfterFirst = statsAfterFirstDispose.TotalReturns;
+
+        // Second disposal (should be no-op due to _disposed check)
+        msg.Dispose();
+        Thread.Sleep(100);
+
+        var statsAfterSecondDispose = pool.GetStatistics();
+
+        // Assert - Second disposal should not increment returns
+        statsAfterSecondDispose.TotalReturns.Should().Be(returnsAfterFirst,
+            "double disposal should not return message twice");
+        statsAfterSecondDispose.OutstandingBuffers.Should().Be(0);
+    }
 }

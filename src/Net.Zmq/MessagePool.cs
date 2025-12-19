@@ -118,6 +118,10 @@ public sealed class MessagePool
     // 재사용 가능한 Message 객체 풀
     private readonly ConcurrentStack<Message>[] _pooledMessages;
 
+    // Per-bucket Interlocked counters for O(1) thread-safe maxBuffer enforcement
+    private long[] _pooledMessageCounts = new long[19];  // Per-bucket counters
+    private long _poolRejects = 0;  // Messages rejected due to maxBuffer
+
     // Statistics
     private long _totalRents;
     private long _totalReturns;
@@ -216,14 +220,30 @@ public sealed class MessagePool
 
     /// <summary>
     /// Message를 풀에 반환합니다.
+    /// maxBuffer 제한을 초과하는 경우 실제로 dispose합니다.
     /// </summary>
     private void ReturnMessageToPool(Message msg)
     {
         if (Interlocked.CompareExchange(ref msg._callbackExecuted, 1, 0) == 0)
         {
-            msg.ReturnToPool();
-            _pooledMessages[msg._poolBucketIndex].Push(msg);
-            Interlocked.Increment(ref _totalReturns);
+            int bucketIndex = msg._poolBucketIndex;
+
+            // Check if pool has room using Interlocked counter (O(1), thread-safe)
+            if (Interlocked.Read(ref _pooledMessageCounts[bucketIndex]) < MaxBuffersPerBucket[bucketIndex])
+            {
+                // Pool has room - return message for reuse
+                msg.ReturnToPool();
+                _pooledMessages[bucketIndex].Push(msg);
+                Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
+                Interlocked.Increment(ref _totalReturns);
+            }
+            else
+            {
+                // Pool is full - actually dispose the message
+                msg.DisposePooledMessage();
+                Interlocked.Increment(ref _totalReturns);
+                Interlocked.Increment(ref _poolRejects);
+            }
         }
     }
 
@@ -312,6 +332,7 @@ public sealed class MessagePool
 
         if (_pooledMessages[bucketIndex].TryPop(out var pooledMsg))
         {
+            Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
             pooledMsg.PrepareForReuse();
             Interlocked.Increment(ref _poolHits);
             Interlocked.Increment(ref _totalRents);
@@ -377,6 +398,7 @@ public sealed class MessagePool
             TotalReturns = Volatile.Read(ref _totalReturns),
             PoolHits = Volatile.Read(ref _poolHits),
             PoolMisses = Volatile.Read(ref _poolMisses),
+            PoolRejects = Volatile.Read(ref _poolRejects),
             OutstandingBuffers = Volatile.Read(ref _totalRents) - Volatile.Read(ref _totalReturns)
         };
     }
@@ -456,13 +478,14 @@ public sealed class MessagePool
                 continue;
 
             int bucketSize = BucketSizes[bucketIndex];
-            int currentCount = _pooledMessages[bucketIndex].Count;
-            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - currentCount);
+            long currentCount = Interlocked.Read(ref _pooledMessageCounts[bucketIndex]);
+            int toAllocate = Math.Min(countPerSize, MaxBuffersPerBucket[bucketIndex] - (int)currentCount);
 
             for (int i = 0; i < toAllocate; i++)
             {
                 var msg = CreatePooledMessage(bucketSize, bucketIndex);
                 _pooledMessages[bucketIndex].Push(msg);
+                Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);
             }
         }
     }
@@ -497,6 +520,9 @@ public sealed class MessagePool
                     msg._initialized = false;
                 }
             }
+
+            // Reset counter for this bucket
+            Interlocked.Exchange(ref _pooledMessageCounts[i], 0);
         }
     }
 
@@ -612,6 +638,12 @@ public struct PoolStatistics
     public long PoolMisses { get; init; }
 
     /// <summary>
+    /// Number of messages rejected due to maxBuffer limit being exceeded.
+    /// These messages are disposed instead of being returned to the pool.
+    /// </summary>
+    public long PoolRejects { get; init; }
+
+    /// <summary>
     /// Number of buffers currently in use (not yet returned).
     /// Should be 0 at the end of benchmarks to ensure no leaks.
     /// </summary>
@@ -644,7 +676,7 @@ public struct PoolStatistics
     public override string ToString()
     {
         return $"Rents: {TotalRents}, Returns: {TotalReturns}, " +
-               $"Hits: {PoolHits}, Misses: {PoolMisses}, " +
+               $"Hits: {PoolHits}, Misses: {PoolMisses}, Rejects: {PoolRejects}, " +
                $"Outstanding: {OutstandingBuffers}, HitRate: {HitRate:P2}";
     }
 }
