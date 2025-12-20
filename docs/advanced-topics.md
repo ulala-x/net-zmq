@@ -100,21 +100,26 @@ while (running)
 Benchmarked on ROUTER-to-ROUTER pattern with concurrent sender and receiver (10,000 messages, Intel Core Ultra 7 265K):
 
 **64-Byte Messages**:
-- Blocking: 2.325 ms (4.30M msg/sec, 232.52 ns latency)
-- Poller: 2.376 ms (4.21M msg/sec, 237.59 ns latency)
-- NonBlocking: 11.447 ms (873.62K msg/sec, 1.14 μs latency)
+- Blocking: 2.187 ms (4.57M msg/sec, 218.7 ns latency)
+- Poller: 2.311 ms (4.33M msg/sec, 231.1 ns latency)
+- NonBlocking: 3.783 ms (2.64M msg/sec, 378.3 ns latency)
 
-**1500-Byte Messages**:
-- Poller: 10.552 ms (947.66K msg/sec, 1.06 μs latency)
-- Blocking: 11.040 ms (905.79K msg/sec, 1.10 μs latency)
-- NonBlocking: 14.909 ms (670.72K msg/sec, 1.49 μs latency)
+**512-Byte Messages**:
+- Poller: 4.718 ms (2.12M msg/sec, 471.8 ns latency)
+- Blocking: 4.902 ms (2.04M msg/sec, 490.2 ns latency)
+- NonBlocking: 6.137 ms (1.63M msg/sec, 613.7 ns latency)
+
+**1024-Byte Messages**:
+- Blocking: 7.541 ms (1.33M msg/sec, 754.1 ns latency)
+- Poller: 7.737 ms (1.29M msg/sec, 773.7 ns latency)
+- NonBlocking: 9.661 ms (1.04M msg/sec, 966.1 ns latency)
 
 **65KB Messages**:
-- Poller: 167.479 ms (59.71K msg/sec, 16.75 μs latency)
-- Blocking: 168.915 ms (59.20K msg/sec, 16.89 μs latency)
-- NonBlocking: 351.448 ms (28.45K msg/sec, 35.14 μs latency)
+- Blocking: 139.915 ms (71.47K msg/sec, 13.99 μs latency)
+- Poller: 141.733 ms (70.56K msg/sec, 14.17 μs latency)
+- NonBlocking: 260.014 ms (38.46K msg/sec, 26.00 μs latency)
 
-Blocking and Poller modes deliver similar performance (96-102% relative), with Poller allocating slightly more memory (323-504 bytes vs 203-384 bytes per 10K messages) for polling infrastructure. NonBlocking mode shows 1.35-4.92x slower performance due to sleep overhead when messages are not immediately available.
+Blocking and Poller modes deliver nearly identical performance (96-106% relative), with Poller allocating slightly more memory (456-640 bytes vs 336-664 bytes per 10K messages) for polling infrastructure. NonBlocking mode shows 1.25-1.86x slower performance due to sleep overhead when messages are not immediately available.
 
 #### Selection Considerations
 
@@ -129,8 +134,8 @@ Blocking and Poller modes deliver similar performance (96-102% relative), with P
 - NonBlocking mode can service multiple sockets with higher latency
 
 **Latency Requirements**:
-- Blocking and Poller modes achieve sub-microsecond latency (232-238 ns for 64-byte messages)
-- NonBlocking mode adds millisecond-level latency due to sleep intervals
+- Blocking and Poller modes achieve sub-microsecond latency (218-231 ns for 64-byte messages)
+- NonBlocking mode adds overhead due to sleep intervals (378 ns for 64-byte messages)
 
 **Thread Management**:
 - Blocking mode dedicates threads to sockets
@@ -234,38 +239,46 @@ socket.Send(message);
 Benchmarked with Poller mode on ROUTER-to-ROUTER pattern (10,000 messages, Intel Core Ultra 7 265K):
 
 **64-Byte Messages**:
-- ArrayPool: 2.595 ms (3.85M msg/sec), 0 GC, 1.07 KB allocated
-- ByteArray: 2.638 ms (3.79M msg/sec), 3.91 Gen0, 1719.07 KB allocated
-- Message: 5.364 ms (1.86M msg/sec), 0 GC, 625.32 KB allocated
-- MessageZeroCopy: 6.428 ms (1.56M msg/sec), 0 GC, 625.32 KB allocated
+- ArrayPool: 2.428 ms (4.12M msg/sec), 0 GC, 1.85 KB allocated
+- ByteArray: 2.438 ms (4.10M msg/sec), 9.77 Gen0, 9860.2 KB allocated
+- Message: 4.279 ms (2.34M msg/sec), 0 GC, 168.54 KB allocated
+- MessageZeroCopy: 5.917 ms (1.69M msg/sec), 0 GC, 168.61 KB allocated
 
-**1500-Byte Messages**:
-- Message: 11.287 ms (886.00K msg/sec), 0 GC, 625.32 KB allocated
-- ByteArray: 11.495 ms (869.97K msg/sec), 78.13 Gen0, 29844.07 KB allocated
-- ArrayPool: 11.929 ms (838.30K msg/sec), 0 GC, 3.01 KB allocated
-- MessageZeroCopy: 14.504 ms (689.46K msg/sec), 0 GC, 625.32 KB allocated
+**512-Byte Messages**:
+- ArrayPool: 6.376 ms (1.57M msg/sec), 0 GC, 2.04 KB allocated
+- ByteArray: 6.707 ms (1.49M msg/sec), 48.83 Gen0, 50017.99 KB allocated
+- Message: 8.187 ms (1.22M msg/sec), 0 GC, 168.72 KB allocated
+- MessageZeroCopy: 13.372 ms (748K msg/sec), 0 GC, 168.80 KB allocated
+
+**1024-Byte Messages**:
+- ArrayPool: 9.021 ms (1.11M msg/sec), 0 GC, 2.24 KB allocated
+- ByteArray: 8.973 ms (1.11M msg/sec), 97.66 Gen0, 100033.11 KB allocated
+- Message: 9.739 ms (1.03M msg/sec), 0 GC, 168.92 KB allocated
+- MessageZeroCopy: 14.612 ms (684K msg/sec), 0 GC, 169.01 KB allocated
 
 **65KB Messages**:
-- MessageZeroCopy: 134.626 ms (74.28K msg/sec), 0 GC, 625.49 KB allocated
-- Message: 142.068 ms (70.39K msg/sec), 0 GC, 625.49 KB allocated
-- ArrayPool: 148.562 ms (67.31K msg/sec), 0 GC, 65.21 KB allocated
-- ByteArray: 150.055 ms (66.64K msg/sec), 3250 Gen0 + 250 Gen1, 1280469.24 KB allocated
+- Message: 119.164 ms (83.93K msg/sec), 0 GC, 171.47 KB allocated
+- MessageZeroCopy: 124.720 ms (80.18K msg/sec), 0 GC, 171.56 KB allocated
+- ArrayPool: 142.814 ms (70.02K msg/sec), 0 GC, 4.78 KB allocated
+- ByteArray: 141.652 ms (70.60K msg/sec), 3906 Gen0 + 781 Gen1, 4001252.47 KB allocated
 
-#### The 1500-Byte Boundary
+#### GC Pressure by Message Size
 
-The transition from minimal to significant GC pressure occurs around 1500 bytes, which approximates Ethernet MTU (Maximum Transmission Unit):
+The transition from minimal to significant GC pressure is clearly visible in the benchmark data:
 
-- Below 1500B: All strategies show manageable GC behavior
-- At 1500B: ByteArray begins showing GC pressure (78 Gen0 collections)
-- Above 1500B: ByteArray triggers substantial garbage collection (3250 Gen0 + 250 Gen1 collections at 65KB)
+- **64B**: ByteArray shows 9.77 Gen0 collections (manageable)
+- **512B**: ByteArray shows 48.83 Gen0 collections (increasing pressure)
+- **1KB**: ByteArray shows 97.66 Gen0 collections (substantial pressure)
+- **65KB**: ByteArray shows 3906 Gen0 + 781 Gen1 collections (severe pressure)
 
-ArrayPool, Message, and MessageZeroCopy maintain zero GC collections regardless of message size.
+ArrayPool, Message, and MessageZeroCopy maintain zero GC collections regardless of message size, demonstrating their effectiveness for GC-sensitive applications.
 
 #### Selection Considerations
 
 **Message Size Distribution**:
-- For small messages (<1500B), performance differences are modest and GC pressure is manageable across all strategies
-- For large messages (>1500B), ByteArray generates substantial GC pressure
+- For small messages (≤512B), ArrayPool offers best performance (1-5% faster) with near-zero GC pressure
+- For large messages (≥64KB), Message offers best performance (16% faster) with zero GC pressure
+- ByteArray generates exponentially increasing GC pressure as message size grows
 - ArrayPool and native strategies maintain zero GC pressure regardless of message size
 
 **GC Sensitivity**:
@@ -285,9 +298,10 @@ ArrayPool, Message, and MessageZeroCopy maintain zero GC collections regardless 
 - The performance crossover depends on message size and access patterns
 
 **Performance Requirements**:
-- When throughput is critical and messages are small, ByteArray or ArrayPool are effective
-- When throughput is critical and messages are large, Message or MessageZeroCopy reduce GC impact
-- When latency consistency matters, GC-free strategies provide more predictable timing
+- When throughput is critical and messages are small (≤512B), ArrayPool is most effective (1-5% faster, zero GC)
+- When throughput is critical and messages are large (≥64KB), Message is most effective (16% faster, zero GC)
+- When latency consistency matters, GC-free strategies (ArrayPool, Message, MessageZeroCopy) provide more predictable timing
+- ByteArray is only suitable for applications where simplicity is paramount and GC pressure is acceptable
 
 ### I/O Threads
 

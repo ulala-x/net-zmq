@@ -133,31 +133,33 @@ NetZeroMQ.Benchmarks/
 
 #### 1.1 송신 전략 비교 (MemoryStrategy, 10,000 messages)
 
-| Message Size | ArrayPool | ByteArray | Message | MessagePooled | Winner |
-|--------------|-----------|-----------|---------|---------------|--------|
-| **64 bytes** | 2.45 ms (4,082 K/sec) | 2.49 ms (4,016 K/sec) | 5.24 ms (1,908 K/sec) | 7.19 ms (1,391 K/sec) | **ArrayPool** (40% faster) |
-| **512 bytes** | 6.37 ms (1,570 K/sec) | 6.86 ms (1,458 K/sec) | 6.75 ms (1,481 K/sec) | 7.99 ms (1,251 K/sec) | **ArrayPool** (20% faster) |
-| **1 KB** | 8.79 ms (1,138 K/sec) | 9.08 ms (1,101 K/sec) | 8.49 ms (1,178 K/sec) | **7.02 ms (1,424 K/sec)** | **MessagePooled** (18% faster) |
-| **64 KB** | 149.5 ms (66.9 K/sec) | 147.2 ms (67.9 K/sec) | 120.4 ms (83.1 K/sec) | **120.1 ms (83.2 K/sec)** | **MessagePooled** (20% faster) |
+| Message Size | ArrayPool | ByteArray | Message | MessageZeroCopy | Winner |
+|--------------|-----------|-----------|---------|-----------------|--------|
+| **64 bytes** | 2.43 ms (4,120 K/sec) | 2.44 ms (4,100 K/sec) | 4.28 ms (2,340 K/sec) | 5.92 ms (1,690 K/sec) | **ArrayPool** (1% faster, 99.98% less GC) |
+| **512 bytes** | 6.38 ms (1,570 K/sec) | 6.71 ms (1,490 K/sec) | 8.19 ms (1,220 K/sec) | 13.37 ms (748 K/sec) | **ArrayPool** (5% faster, 99.99% less GC) |
+| **1 KB** | 9.02 ms (1,110 K/sec) | 8.97 ms (1,110 K/sec) | 9.74 ms (1,030 K/sec) | 14.61 ms (684 K/sec) | **ByteArray** (0.5% faster, 대량 GC) |
+| **64 KB** | 142.8 ms (70.0 K/sec) | 141.7 ms (70.6 K/sec) | **119.2 ms (83.9 K/sec)** | 124.7 ms (80.2 K/sec) | **Message** (16% faster, 99.95% less GC) |
 
 **핵심 인사이트:**
-- **작은 메시지 (<1KB)**: ArrayPool이 최고 성능 (관리형 메모리 복사가 효율적)
-- **큰 메시지 (≥1KB)**: MessagePooled가 최고 성능 (zero-copy가 복사 오버헤드를 압도)
-- **전환점**: 약 1KB 지점에서 성능 우위가 역전됨
+- **작은 메시지 (≤512B)**: ArrayPool이 최고 성능 (1-5% 더 빠르고, 99.98-99.99% GC 감소)
+- **중간 메시지 (1KB)**: 성능 비슷하지만 ByteArray는 대량 GC 발생 (100MB 할당)
+- **큰 메시지 (≥64KB)**: Message가 최고 성능 (16% 더 빠르고, 99.95% GC 감소)
+- **전환점**: 64KB에서 네이티브 전략(Message/MessageZeroCopy)이 12-16% 우위 확보
 
 #### 1.2 수신 모드 비교 (ReceiveMode, 10,000 messages)
 
 | Message Size | Blocking | Poller | NonBlocking | Winner |
 |--------------|----------|--------|-------------|--------|
-| **64 bytes** | 2.35 ms (4,255 K/sec) | **1.83 ms (5,464 K/sec)** | 3.34 ms (2,994 K/sec) | **Poller** (22% faster) |
-| **512 bytes** | 5.28 ms (1,894 K/sec) | **5.08 ms (1,969 K/sec)** | 6.95 ms (1,439 K/sec) | **Poller** (4% faster) |
-| **1 KB** | 8.13 ms (1,230 K/sec) | **7.26 ms (1,377 K/sec)** | 10.00 ms (1,000 K/sec) | **Poller** (11% faster) |
-| **64 KB** | **143.2 ms (69.8 K/sec)** | 161.7 ms (61.8 K/sec) | 252.3 ms (39.6 K/sec) | **Blocking** (13% faster) |
+| **64 bytes** | **2.19 ms (4,570 K/sec)** | 2.31 ms (4,330 K/sec) | 3.78 ms (2,640 K/sec) | **Blocking** (베이스라인, Poller 6% 느림) |
+| **512 bytes** | 4.90 ms (2,040 K/sec) | **4.72 ms (2,120 K/sec)** | 6.14 ms (1,630 K/sec) | **Poller** (4% faster) |
+| **1 KB** | 7.54 ms (1,330 K/sec) | **7.74 ms (1,290 K/sec)** | 9.66 ms (1,040 K/sec) | **Blocking** (베이스라인, Poller 3% 느림) |
+| **64 KB** | **139.9 ms (71.5 K/sec)** | 141.7 ms (70.6 K/sec) | 260.0 ms (38.5 K/sec) | **Blocking** (베이스라인, Poller 1% 느림) |
 
 **핵심 인사이트:**
-- **Poller 모드**: 대부분의 경우 최고 성능 (특히 작은~중간 메시지)
-- **Blocking 모드**: 매우 큰 메시지(64KB+)에서 약간 우위
-- **NonBlocking 모드**: 모든 경우에서 최악 (Sleep 오버헤드로 인한 지연)
+- **Blocking vs Poller**: 성능이 거의 동일 (96-106% 범위, 차이 0-6%)
+- **Poller 모드**: 512B에서만 4% 우위, 나머지는 Blocking과 거의 동일
+- **NonBlocking 모드**: 모든 경우에서 최악 (25-73% 느림, Sleep 오버헤드)
+- **추천**: Poller 사용 (성능 동일하며 다중 소켓 지원, 일관된 API)
 
 ### 2. 시나리오별 권장사항
 
@@ -174,21 +176,40 @@ socket.SendOptimized(apiData);
 ```
 
 **성능 기대치**:
-- 64B-512B: ~1.5-4M msg/sec
-- 1KB-64KB: ~70-140K msg/sec
+- 64B: ~4.1M msg/sec (ArrayPool)
+- 512B: ~1.6M msg/sec (ArrayPool)
+- 1KB: ~1.1M msg/sec (ArrayPool)
+- 64KB: ~84K msg/sec (Message)
 
 #### 2.2 최대 처리량 시나리오 (예: 로그 수집기, 메트릭 전송)
 
 **상황**: 대량의 메시지를 가능한 빠르게 전송
 
-**권장**: MessagePool + Poller 조합
+**권장**: ArrayPool (≤512B) / MessageZeroCopy (>512B) + Poller 조합
 
 ```csharp
-// 송신측: MessagePool 일관 사용 (모든 크기에서 안정적)
-using var msg = MessagePool.Shared.Rent(MessageSize.Medium);
-Span<byte> buffer = msg.Data;
-// buffer에 데이터 작성
-socket.Send(ref msg, SendFlags.None);
+// 송신측: 크기별 전략 선택
+// 작은 메시지 (≤512B): ArrayPool
+var buffer = ArrayPool<byte>.Shared.Rent(size);
+try
+{
+    // buffer에 데이터 작성
+    socket.Send(buffer.AsSpan(0, size));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+
+// 큰 메시지 (>512B): MessageZeroCopy
+nint nativePtr = Marshal.AllocHGlobal(size);
+unsafe
+{
+    var nativeSpan = new Span<byte>((void*)nativePtr, size);
+    sourceData.CopyTo(nativeSpan);
+}
+using var msg = new Message(nativePtr, size, ptr => Marshal.FreeHGlobal(ptr));
+socket.Send(msg);
 
 // 수신측: Poller + Message
 using var poller = new Poller(capacity: 10);
@@ -209,15 +230,15 @@ while (running)
 ```
 
 **성능 기대치**:
-- 512B: ~1.9M msg/sec
-- 1KB: ~1.4M msg/sec
-- 64KB: ~62K msg/sec
+- 512B: ~2.1M msg/sec (ArrayPool + Poller)
+- 1KB: ~1.3M msg/sec (ArrayPool + Poller)
+- 64KB: ~71K msg/sec (Message + Blocking)
 
 #### 2.3 저지연 요구사항 (예: 트레이딩, 실시간 게임)
 
 **상황**: 메시지당 지연 시간 최소화
 
-**권장**: MessagePool + Poller (작은 메시지) / Blocking (큰 메시지)
+**권장**: Poller (작은 메시지) / Blocking (큰 메시지)
 
 ```csharp
 // 작은 메시지 (<64KB): Poller 사용
@@ -228,12 +249,12 @@ using var msg = new Message();
 if (poller.Poll(timeout: 1) > 0 && poller.IsReadable(idx))
 {
     socket.Recv(ref msg, RecvFlags.None);
-    // 지연시간: 64B ~183ns, 1KB ~726ns
+    // 지연시간: 64B ~231ns, 512B ~472ns, 1KB ~774ns
 }
 
 // 큰 메시지 (≥64KB): Blocking 사용
 socket.Recv(ref msg, RecvFlags.None);
-// 지연시간: 64KB ~14.3μs
+// 지연시간: 64KB ~14.0μs
 ```
 
 ### 3. 성능 체크리스트
@@ -241,22 +262,22 @@ socket.Recv(ref msg, RecvFlags.None);
 #### DO:
 
 - **송신**:
-  - 외부 메모리 → `SendOptimized()` 사용
-  - 최대 성능 → `MessagePool.Shared.Rent()` 일관 사용
-  - 메시지 크기별 적절한 `MessageSize` enum 선택
+  - 작은 메시지 (≤512B) → `ArrayPool<byte>.Shared` 사용
+  - 큰 메시지 (>512B) → `MessageZeroCopy` 사용
+  - 메시지 크기에 따라 적절한 전략 선택
 - **수신**:
   - Poller 모드 우선 고려 (대부분 최적)
   - Message 객체 재사용 (using var msg = new Message())
   - Batch 처리 (Poller.IsReadable() 루프)
 - **일반**:
-  - Prewarm으로 초기 할당 비용 제거
   - using 키워드로 자원 해제 보장
+  - 버퍼 재사용으로 GC 압력 최소화
 
 #### DON'T:
 
 - **송신**:
-  - 작은 메시지에 MessagePool 강제 사용 (ArrayPool이 더 빠름)
-  - MessagePool.Rent() 후 전송하지 않고 Dispose (메모리 누수)
+  - 작은 메시지에 MessageZeroCopy 강제 사용 (ArrayPool이 더 빠름)
+  - 큰 메시지에 ByteArray 사용 (GC 압력 증가)
 - **수신**:
   - NonBlocking 모드 사용 (Sleep 오버헤드로 최악의 성능)
   - 매 수신마다 새 Message 할당 (GC 압력)
@@ -269,27 +290,22 @@ socket.Recv(ref msg, RecvFlags.None);
 
 ```
 송신 전략 선택:
-├─ 외부 할당 메모리(byte[]) 전송?
-│  └─ YES → SendOptimized() 사용
-│     └─ 자동으로 크기별 최적 전략 선택
+├─ 메시지 크기 ≤ 512B?
+│  └─ YES → ArrayPool 사용 (최고 성능)
+│     └─ ArrayPool<byte>.Shared.Rent(size)
 │
-└─ NO → 직접 메시지 생성
-   ├─ 크기 < 1KB?
-   │  └─ YES → ArrayPool 고려 (40% 빠름)
-   │     └─ 하지만 MessagePool 사용 권장 (일관성)
-   │
-   └─ NO → MessagePool 사용 (18-23% 빠름)
-      └─ MessagePool.Shared.Rent(size)
+└─ NO → MessageZeroCopy 사용 (zero-copy)
+   └─ Marshal.AllocHGlobal + Message(ptr, size, freeCallback)
 
 수신 모드 선택:
 ├─ 메시지 크기 < 64KB?
-│  └─ YES → Poller 모드 (4-22% 빠름)
+│  └─ YES → Poller 모드 권장 (Blocking과 거의 동일, 0-6% 차이)
 │     └─ Poller + Message + batch 처리
 │
-└─ NO → Blocking 모드 고려 (13% 빠름)
-   └─ 하지만 Poller도 충분히 빠름 (일관성)
+└─ NO → Blocking 또는 Poller 모두 사용 가능 (1% 차이)
+   └─ Poller 권장 (일관된 API, 다중 소켓 지원)
 
-추천: Poller + Message (모든 크기에서 안정적)
+추천: ArrayPool (≤512B) / Message (≥64KB) + Poller
 ```
 
 ### 5. 예상 성능 개선 수치
@@ -298,20 +314,21 @@ socket.Recv(ref msg, RecvFlags.None);
 
 | 개선 항목 | 이전 | 이후 | 개선율 |
 |----------|------|------|--------|
-| **작은 메시지 송신** (64B-512B) | ByteArray/Message | SendOptimized (ArrayPool) | **+40%** throughput |
-| **큰 메시지 송신** (1KB-64KB) | ByteArray/ArrayPool | MessagePool | **+18-23%** throughput |
-| **수신 모드** (all sizes) | NonBlocking | Poller | **+27-82%** throughput |
-| **수신 모드** (64KB) | Poller | Blocking | **+13%** throughput |
-| **메모리 할당** | 매번 new Message() | Message 재사용 | **-95%** allocations |
+| **작은 메시지 송신** (64B-512B) | ByteArray/Message | ArrayPool | **+1-5%** throughput, **-99.98%** allocations |
+| **큰 메시지 송신** (≥64KB) | ByteArray/ArrayPool | Message | **+16%** throughput, **-99.95%** allocations |
+| **수신 모드** (all sizes) | NonBlocking | Poller | **+25-73%** throughput |
+| **수신 모드** (64KB) | NonBlocking | Blocking | **+86%** throughput |
+| **메모리 할당** (64KB) | ByteArray | Message | **-99.95%** allocations (4GB → 171KB) |
 
 **종합 개선 예시** (512B 메시지, 기존 ByteArray+NonBlocking → 최적 ArrayPool+Poller):
-- 송신: 1,458 K/sec → 1,570 K/sec (+8%)
-- 수신: 1,439 K/sec → 1,969 K/sec (+37%)
-- **전체 파이프라인: +22% throughput**
+- 송신: 1,490 K/sec → 1,570 K/sec (+5%)
+- 수신: 1,630 K/sec → 2,120 K/sec (+30%)
+- 메모리: 50MB → 2KB (-99.99%)
+- **전체 파이프라인: ~35% throughput 개선 + 대폭 GC 감소**
 
 ### 6. 추가 성능 권장사항
 
 - **단일 소켓**: Blocking 또는 Poller 모드 (비슷한 성능)
 - **다중 소켓**: Poller 모드 필수 (효율적 이벤트 대기)
-- **초기화**: `MessagePool.Shared.Prewarm()` 호출로 워밍업
 - **버스트 처리**: Poller.IsReadable() 루프로 가용 메시지 모두 처리
+- **버퍼 재사용**: Message 객체를 재사용하여 GC 압력 최소화

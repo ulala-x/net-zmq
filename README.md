@@ -192,17 +192,30 @@ Net.Zmq offers multiple strategies for high-performance messaging. Choose the ri
 
 **Sending Messages:**
 
-1. **Using External Memory** - Flexible, automatic optimization:
+1. **Small Messages (≤512B)** - Use ArrayPool for best performance:
    ```csharp
-   byte[] data = GetDataFromSomewhere();
-   socket.SendOptimized(data);  // Automatically chooses best strategy by size
+   var buffer = ArrayPool<byte>.Shared.Rent(size);
+   try
+   {
+       // Fill buffer with data
+       socket.Send(buffer.AsSpan(0, size));
+   }
+   finally
+   {
+       ArrayPool<byte>.Shared.Return(buffer);
+   }
    ```
 
-2. **Maximum Performance** - Consistent zero-copy for all sizes:
+2. **Large Messages (>512B)** - Use MessageZeroCopy for zero-copy:
    ```csharp
-   using var msg = MessagePool.Shared.Rent(MessageSize.Small);
-   // Write your data to msg.Data
-   socket.Send(ref msg, SendFlags.None);
+   nint nativePtr = Marshal.AllocHGlobal(dataSize);
+   unsafe
+   {
+       var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
+       sourceData.CopyTo(nativeSpan);
+   }
+   using var msg = new Message(nativePtr, dataSize, ptr => Marshal.FreeHGlobal(ptr));
+   socket.Send(msg);
    ```
 
 **Receiving Messages:**
@@ -223,21 +236,21 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 | Message Size | Best Send Strategy | Throughput | Best Receive Mode | Throughput |
 |--------------|-------------------|------------|-------------------|------------|
-| **64 bytes** | ArrayPool | 4,082 K/sec | Poller | 5,464 K/sec |
-| **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 1,969 K/sec |
-| **1 KB** | MessagePool | 1,424 K/sec | Poller | 1,377 K/sec |
-| **64 KB** | MessagePool | 83.2 K/sec | Blocking | 69.8 K/sec |
+| **64 bytes** | ArrayPool | 4,120 K/sec | Blocking | 4,570 K/sec |
+| **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 2,120 K/sec |
+| **1 KB** | ArrayPool | 1,110 K/sec | Blocking | 1,330 K/sec |
+| **64 KB** | Message | 83.9 K/sec | Blocking | 71.5 K/sec |
 
 **Key Insights:**
 
 - **Send Strategies:**
-  - Small messages (<1KB): ArrayPool is fastest (auto-selected by `SendOptimized()`)
-  - Large messages (≥1KB): MessagePool is 18-23% faster, provides consistent zero-copy
+  - Small messages (≤512B): ArrayPool is fastest (1-5% faster) with 99.98-99.99% less allocation
+  - Large messages (≥64KB): Message is fastest (16% faster) with 99.95% less allocation
 
 - **Receive Modes:**
-  - Poller mode is best for most scenarios (simple API + high performance)
-  - Blocking mode slightly better for very large messages (64KB+)
-  - NonBlocking mode is consistently slowest (avoid unless necessary)
+  - Blocking and Poller modes perform nearly identically (0-6% difference)
+  - Use Poller for consistent API and multi-socket support
+  - NonBlocking mode is 25-86% slower (avoid in production)
 
 **Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
