@@ -1,78 +1,78 @@
 [![English](https://img.shields.io/badge/lang-en-red.svg)](README.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](README.ko.md)
 
-# NetZeroMQ ROUTER-DEALER Async Broker Sample
+# NetZeroMQ ROUTER-DEALER 비동기 브로커 샘플
 
-This sample demonstrates the ZeroMQ Router-Dealer async broker pattern using NetZeroMQ.
+이 샘플은 NetZeroMQ를 사용한 ZeroMQ Router-Dealer 비동기 브로커 패턴을 보여줍니다.
 
-## Pattern Overview
+## 패턴 개요
 
-The async broker pattern provides a load-balancing message broker that routes requests from multiple clients to multiple workers asynchronously.
+비동기 브로커 패턴은 여러 클라이언트의 요청을 여러 워커에게 비동기적으로 라우팅하는 부하 분산 메시지 브로커를 제공합니다.
 
-### Architecture
+### 아키텍처
 
 ```
 Clients (DEALER)  →  Broker (ROUTER-ROUTER)  →  Workers (DEALER)
                          Frontend | Backend
 ```
 
-- **Frontend (ROUTER)**: Receives requests from clients
-- **Backend (ROUTER)**: Distributes work to workers
-- **Clients (DEALER)**: Send requests and receive replies asynchronously
-- **Workers (DEALER)**: Process requests and send replies
+- **프론트엔드 (ROUTER)**: 클라이언트로부터 요청을 수신합니다
+- **백엔드 (ROUTER)**: 워커에게 작업을 분배합니다
+- **클라이언트 (DEALER)**: 비동기적으로 요청을 보내고 응답을 수신합니다
+- **워커 (DEALER)**: 요청을 처리하고 응답을 보냅니다
 
-## Key Patterns Demonstrated
+## 주요 패턴
 
-### 1. Explicit Routing IDs
-Both clients and workers set explicit routing IDs:
+### 1. 명시적 라우팅 ID
+클라이언트와 워커 모두 명시적 라우팅 ID를 설정합니다:
 ```csharp
 socket.SetOption(SocketOption.Routing_Id, "client-1");
 ```
 
-### 2. Multipart Message Format
+### 2. 멀티파트 메시지 형식
 
-**Client to Broker (DEALER → ROUTER)**:
+**클라이언트에서 브로커로 (DEALER → ROUTER)**:
 ```
-[empty frame]
-[request data]
-```
-
-**Broker receives from Client (ROUTER adds identity)**:
-```
-[client-identity]
-[empty frame]
-[request data]
+[빈 프레임]
+[요청 데이터]
 ```
 
-**Broker to Worker (ROUTER → DEALER)**:
+**브로커가 클라이언트로부터 수신 (ROUTER가 식별자 추가)**:
 ```
-[worker-identity]
-[empty frame]
-[client-identity]
-[empty frame]
-[request data]
+[클라이언트 식별자]
+[빈 프레임]
+[요청 데이터]
 ```
 
-**Worker receives from Broker (DEALER strips identity)**:
+**브로커에서 워커로 (ROUTER → DEALER)**:
 ```
-[empty frame]
-[client-identity]
-[empty frame]
-[request data]
+[워커 식별자]
+[빈 프레임]
+[클라이언트 식별자]
+[빈 프레임]
+[요청 데이터]
 ```
 
-### 3. Asynchronous Request/Reply
-Unlike REQ-REP, DEALER sockets:
-- Don't enforce strict request-reply order
-- Can send multiple requests without waiting for replies
-- Enable true async communication
+**워커가 브로커로부터 수신 (DEALER가 식별자 제거)**:
+```
+[빈 프레임]
+[클라이언트 식별자]
+[빈 프레임]
+[요청 데이터]
+```
 
-### 4. Load Balancing
-The broker maintains a queue of available workers and routes requests to the least recently used worker.
+### 3. 비동기 요청/응답
+REQ-REP와 달리 DEALER 소켓은:
+- 엄격한 요청-응답 순서를 강제하지 않습니다
+- 응답을 기다리지 않고 여러 요청을 보낼 수 있습니다
+- 진정한 비동기 통신을 가능하게 합니다
 
-## Running the Sample
+### 4. 부하 분산
+브로커는 사용 가능한 워커의 큐를 유지하고 가장 최근에 사용되지 않은 워커에게 요청을 라우팅합니다.
 
-### Prerequisites
-The sample requires the native libzmq library. For development, copy `libzmq.dll` to the output directory:
+## 샘플 실행
+
+### 사전 요구 사항
+이 샘플은 네이티브 libzmq 라이브러리가 필요합니다. 개발을 위해 `libzmq.dll`을 출력 디렉토리에 복사하세요:
 
 ```bash
 # Windows (PowerShell)
@@ -85,17 +85,17 @@ cp native/runtimes/linux-x64/native/libzmq.so samples/NetZeroMQ.Samples.RouterDe
 cp native/runtimes/osx-x64/native/libzmq.dylib samples/NetZeroMQ.Samples.RouterDealer/bin/Debug/net8.0/
 ```
 
-### Build and Run
+### 빌드 및 실행
 
 ```bash
-# Build
+# 빌드
 dotnet build
 
-# Run
+# 실행
 dotnet run
 ```
 
-### Expected Output
+### 예상 출력
 
 ```
 NetZeroMQ ROUTER-DEALER Async Broker Sample
@@ -125,18 +125,18 @@ NetZeroMQ ROUTER-DEALER Async Broker Sample
 ...
 ```
 
-## Code Highlights
+## 코드 하이라이트
 
-### Broker Implementation
+### 브로커 구현
 ```csharp
-// Create ROUTER sockets for both frontend and backend
+// 프론트엔드와 백엔드 모두에 대해 ROUTER 소켓 생성
 using var frontend = new Socket(ctx, SocketType.Router);
 using var backend = new Socket(ctx, SocketType.Router);
 
-frontend.Bind("tcp://*:5555");  // For clients
-backend.Bind("tcp://*:5556");   // For workers
+frontend.Bind("tcp://*:5555");  // 클라이언트용
+backend.Bind("tcp://*:5556");   // 워커용
 
-// Create Poller and add both sockets
+// Poller 생성 및 두 소켓 추가
 using var poller = new Poller(capacity: 2);
 int frontendIdx = poller.Add(frontend, PollEvents.In);
 int backendIdx = poller.Add(backend, PollEvents.In);
@@ -147,67 +147,67 @@ while (true)
 
     if (poller.IsReadable(frontendIdx))
     {
-        // Handle client request
+        // 클라이언트 요청 처리
     }
 
     if (poller.IsReadable(backendIdx))
     {
-        // Handle worker response or READY message
+        // 워커 응답 또는 READY 메시지 처리
     }
 }
 ```
 
-### Client Implementation
+### 클라이언트 구현
 ```csharp
 using var socket = new Socket(ctx, SocketType.Dealer);
 socket.SetOption(SocketOption.Routing_Id, "client-1");
 socket.Connect("tcp://localhost:5555");
 
-// Send request (DEALER adds empty frame)
+// 요청 전송 (DEALER가 빈 프레임 추가)
 socket.Send(Array.Empty<byte>(), SendFlags.SendMore);
 socket.Send("Request data", SendFlags.None);
 
-// Receive reply
+// 응답 수신
 var empty = RecvBytes(socket);
 var reply = socket.RecvString();
 ```
 
-### Worker Implementation
+### 워커 구현
 ```csharp
 using var socket = new Socket(ctx, SocketType.Dealer);
 socket.SetOption(SocketOption.Routing_Id, "worker-1");
 socket.Connect("tcp://localhost:5556");
 
-// Send READY message
+// READY 메시지 전송
 socket.Send(Array.Empty<byte>(), SendFlags.SendMore);
 socket.Send("READY", SendFlags.SendMore);
 socket.Send(Array.Empty<byte>(), SendFlags.SendMore);
 socket.Send("READY", SendFlags.None);
 
-// Receive request
+// 요청 수신
 var empty1 = RecvBytes(socket);
 var clientId = RecvBytes(socket);
 var empty2 = RecvBytes(socket);
 var request = RecvBytes(socket);
 
-// Process and send reply
+// 처리 후 응답 전송
 socket.Send(Array.Empty<byte>(), SendFlags.SendMore);
 socket.Send(clientId, SendFlags.SendMore);
 socket.Send(Array.Empty<byte>(), SendFlags.SendMore);
 socket.Send("Reply data", SendFlags.None);
 ```
 
-## Use Cases
+## 사용 사례
 
-This pattern is ideal for:
-- Load-balanced request processing
-- Distributed task queues
-- Microservice architectures
-- Async RPC systems
-- Worker pool management
+이 패턴은 다음과 같은 경우에 이상적입니다:
+- 부하 분산 요청 처리
+- 분산 작업 큐
+- 마이크로서비스 아키텍처
+- 비동기 RPC 시스템
+- 워커 풀 관리
 
-## References
+## 참고 자료
 
-- [ZeroMQ Guide - Advanced Request-Reply](http://zguide.zeromq.org/page:all#Advanced-Request-Reply-Patterns)
-- [ROUTER Socket Type](http://api.zeromq.org/4-3:zmq-socket#toc17)
-- [DEALER Socket Type](http://api.zeromq.org/4-3:zmq-socket#toc15)
+- [ZeroMQ 가이드 - 고급 요청-응답 패턴](http://zguide.zeromq.org/page:all#Advanced-Request-Reply-Patterns)
+- [ROUTER 소켓 유형](http://api.zeromq.org/4-3:zmq-socket#toc17)
+- [DEALER 소켓 유형](http://api.zeromq.org/4-3:zmq-socket#toc15)
