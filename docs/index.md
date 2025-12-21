@@ -1,5 +1,7 @@
 # Net.Zmq Documentation
 
+[![English](https://img.shields.io/badge/lang-en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](index.ko.md)
+
 Welcome to Net.Zmq! A modern .NET 8+ binding for ZeroMQ with a cppzmq-style API, delivering high-performance message queuing for distributed applications.
 
 ## What is Net.Zmq?
