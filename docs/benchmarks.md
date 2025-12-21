@@ -1,3 +1,5 @@
+[![English](https://img.shields.io/badge/lang-en-red.svg)](benchmarks.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](benchmarks.ko.md)
+
 # Net.Zmq Performance Benchmarks
 
 This document contains comprehensive performance benchmark results for Net.Zmq, focusing on receive mode comparisons and memory strategy evaluations.

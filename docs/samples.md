@@ -1,3 +1,5 @@
+[![English](https://img.shields.io/badge/lang-en-red.svg)](samples.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](samples.ko.md)
+
 # Sample Applications
 
 Net.Zmq includes comprehensive sample applications demonstrating various messaging patterns and features. Each sample is a complete, runnable application.
