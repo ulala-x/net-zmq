@@ -1,3 +1,5 @@
+[![English](https://img.shields.io/badge/lang-en-red.svg)](README.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](README.ko.md)
+
 # NetZeroMQ.Benchmarks
 
 NetZeroMQ Performance Benchmark Tool
