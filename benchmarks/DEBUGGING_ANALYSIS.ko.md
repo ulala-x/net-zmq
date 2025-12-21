@@ -17,5 +17,5 @@ MessagePool 기능이 제거된 이유:
 - 더 단순한 API 표면적으로 유지보수성 향상
 
 현재 성능 권장사항은 다음을 참조하세요:
-- [docs/benchmarks.md](/docs/benchmarks.md)
+- [docs/benchmarks.ko.md](/docs/benchmarks.ko.md)
 - [benchmarks/Net.Zmq.Benchmarks/README.ko.md](Net.Zmq.Benchmarks/README.ko.md)

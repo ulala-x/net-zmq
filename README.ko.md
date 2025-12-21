@@ -256,7 +256,7 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 **테스트 환경**: Intel Core Ultra 7 265K (20코어), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [benchmarks/Net.Zmq.Benchmarks/README.md](benchmarks/Net.Zmq.Benchmarks/README.md)를 참조하세요.
+자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [benchmarks/Net.Zmq.Benchmarks/README.ko.md](benchmarks/Net.Zmq.Benchmarks/README.ko.md)를 참조하세요.
 
 ## 지원 플랫폼
 

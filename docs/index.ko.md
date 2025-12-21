@@ -117,7 +117,7 @@ Net.Zmq는 뛰어난 성능을 제공합니다:
 
 **테스트 환경**: Intel Core Ultra 7 265K, .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-포괄적인 성능 메트릭은 [docs/benchmarks.md](docs/benchmarks.md)를 참조하세요.
+포괄적인 성능 메트릭은 [benchmarks.ko.md](benchmarks.ko.md)를 참조하세요.
 
 ## 플랫폼 지원
 
