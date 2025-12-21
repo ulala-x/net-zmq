@@ -6,7 +6,7 @@ labels: bug
 assignees: ''
 ---
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](bug_report.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](bug_report.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](bug_report.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](bug_report.ko.md)
 
 ## Description
 A clear and concise description of the bug.

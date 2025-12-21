@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](DEBUGGING_ANALYSIS.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](DEBUGGING_ANALYSIS.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](DEBUGGING_ANALYSIS.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](DEBUGGING_ANALYSIS.ko.md)
 
 # Performance Analysis Archive
 

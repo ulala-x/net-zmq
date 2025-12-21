@@ -1,6 +1,6 @@
 # NetZeroMQ 기여하기
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](CONTRIBUTING.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](CONTRIBUTING.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](CONTRIBUTING.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](CONTRIBUTING.ko.md)
 
 NetZeroMQ에 기여하는 데 관심을 가져주셔서 감사합니다! 이 문서는 기여자를 위한 가이드라인과 정보를 제공합니다.
 

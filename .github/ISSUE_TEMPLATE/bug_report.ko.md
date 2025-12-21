@@ -6,7 +6,7 @@ labels: bug
 assignees: ''
 ---
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](bug_report.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](bug_report.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](bug_report.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](bug_report.ko.md)
 
 ## 설명
 버그에 대한 명확하고 간결한 설명을 작성해주세요.

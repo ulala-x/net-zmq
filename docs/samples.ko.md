@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](samples.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](samples.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](samples.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](samples.ko.md)
 
 # 샘플 애플리케이션
 

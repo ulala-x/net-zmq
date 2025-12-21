@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](patterns.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](patterns.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](patterns.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](patterns.ko.md)
 
 # Messaging Patterns
 

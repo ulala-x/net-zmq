@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](index.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](index.ko.md)
 
 # Net.Zmq
 

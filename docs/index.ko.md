@@ -1,6 +1,6 @@
 # Net.Zmq 문서
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](index.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](index.ko.md)
 
 Net.Zmq에 오신 것을 환영합니다! cppzmq 스타일 API를 제공하는 현대적인 .NET 8+ ZeroMQ 바인딩으로, 분산 애플리케이션을 위한 고성능 메시지 큐잉을 제공합니다.
 

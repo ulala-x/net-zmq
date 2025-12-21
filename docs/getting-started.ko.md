@@ -1,6 +1,6 @@
 # 시작하기
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](getting-started.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](getting-started.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](getting-started.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](getting-started.ko.md)
 
 Net.Zmq에 오신 것을 환영합니다! 이 가이드는 ZeroMQ를 위한 현대적인 .NET 8+ 바인딩인 Net.Zmq를 시작하는 데 도움을 드립니다.
 

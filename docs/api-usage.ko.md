@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](api-usage.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](api-usage.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](api-usage.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](api-usage.ko.md)
 
 # API 사용 가이드
 

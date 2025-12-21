@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](advanced-topics.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](advanced-topics.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](advanced-topics.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](advanced-topics.ko.md)
 
 # 고급 주제
 

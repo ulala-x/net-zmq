@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](benchmarks.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](benchmarks.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](benchmarks.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](benchmarks.ko.md)
 
 # Net.Zmq Performance Benchmarks
 

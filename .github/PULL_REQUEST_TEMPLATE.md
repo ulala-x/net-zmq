@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](PULL_REQUEST_TEMPLATE.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](PULL_REQUEST_TEMPLATE.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](PULL_REQUEST_TEMPLATE.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](PULL_REQUEST_TEMPLATE.ko.md)
 
 ## Description
 Brief description of the changes in this PR.

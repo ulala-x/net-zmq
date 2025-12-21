@@ -1,6 +1,6 @@
 # Getting Started
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](getting-started.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](getting-started.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](getting-started.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](getting-started.ko.md)
 
 Welcome to Net.Zmq! This guide will help you get started with Net.Zmq, a modern .NET 8+ binding for ZeroMQ.
 

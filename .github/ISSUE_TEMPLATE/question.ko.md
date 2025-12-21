@@ -6,7 +6,7 @@ labels: question
 assignees: ''
 ---
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](question.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](question.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](question.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](question.ko.md)
 
 ## 질문
 질문 내용을 작성해주세요.

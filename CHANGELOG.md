@@ -1,4 +1,4 @@
-[![English](https://img.shields.io/badge/lang-en-red.svg)](CHANGELOG.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](CHANGELOG.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](CHANGELOG.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](CHANGELOG.ko.md)
 
 # Changelog
 

@@ -6,7 +6,7 @@ labels: enhancement
 assignees: ''
 ---
 
-[![English](https://img.shields.io/badge/lang-en-red.svg)](feature_request.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](feature_request.ko.md)
+[![English](https://img.shields.io/badge/lang:en-red.svg)](feature_request.md) [![한국어](https://img.shields.io/badge/lang:한국어-blue.svg)](feature_request.ko.md)
 
 ## 문제 상황
 겪고 있는 문제나 제약사항을 명확하게 설명해주세요.
