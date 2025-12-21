@@ -10,6 +10,9 @@
 .claude/
 CLAUDE.md
 
+# Blog content (used elsewhere)
+blog/
+
 # OS
 .DS_Store
 Thumbs.db
