@@ -1,32 +1,32 @@
 [![English](https://img.shields.io/badge/lang-en-red.svg)](patterns.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](patterns.ko.md)
 
-# Messaging Patterns
+# 메시징 패턴 (Messaging Patterns)
 
-ZeroMQ provides several built-in messaging patterns for different communication scenarios. This guide covers all patterns supported by Net.Zmq with practical examples.
+ZeroMQ는 다양한 통신 시나리오를 위한 여러 내장 메시징 패턴을 제공합니다. 이 가이드는 Net.Zmq가 지원하는 모든 패턴을 실용적인 예제와 함께 다룹니다.
 
-## Overview
+## 개요
 
-| Pattern | Sockets | Use Case |
+| 패턴 | 소켓 | 사용 사례 |
 |---------|---------|----------|
-| Request-Reply | REQ-REP | Synchronous client-server |
-| Publish-Subscribe | PUB-SUB | One-to-many broadcast |
-| Push-Pull | PUSH-PULL | Load-balanced pipeline |
-| Router-Dealer | ROUTER-DEALER | Asynchronous client-server |
-| Pair | PAIR | Exclusive two-way communication |
+| Request-Reply | REQ-REP | 동기식 클라이언트-서버 |
+| Publish-Subscribe | PUB-SUB | 일대다 브로드캐스트 |
+| Push-Pull | PUSH-PULL | 부하 분산 파이프라인 |
+| Router-Dealer | ROUTER-DEALER | 비동기 클라이언트-서버 |
+| Pair | PAIR | 독점적 양방향 통신 |
 
-## Request-Reply Pattern (REQ-REP)
+## Request-Reply 패턴 (REQ-REP)
 
-The REQ-REP pattern implements synchronous client-server communication. The client sends a request and waits for a reply.
+REQ-REP 패턴은 동기식 클라이언트-서버 통신을 구현합니다. 클라이언트는 요청을 보내고 응답을 기다립니다.
 
-### Characteristics
+### 특징
 
-- **Synchronous**: Client blocks until reply is received
-- **Lockstep**: Must alternate send-receive-send-receive
-- **One-to-one**: Each request gets exactly one reply
+- **동기식 (Synchronous)**: 클라이언트는 응답을 받을 때까지 대기
+- **고정 순서 (Lockstep)**: 송신-수신-송신-수신 순서를 번갈아 수행
+- **일대일 (One-to-one)**: 각 요청은 정확히 하나의 응답을 받음
 
-### Example: Simple Echo Server
+### 예제: 간단한 에코 서버
 
-**Server (REP)**:
+**서버 (REP)**:
 ```csharp
 using Net.Zmq;
 
@@ -47,7 +47,7 @@ while (true)
 }
 ```
 
-**Client (REQ)**:
+**클라이언트 (REQ)**:
 ```csharp
 using Net.Zmq;
 
@@ -64,27 +64,27 @@ var reply = client.RecvString();
 Console.WriteLine($"Reply: {reply}");
 ```
 
-### Best Practices
+### 모범 사례
 
-- Always match Send() with RecvString()/RecvBytes()
-- Use try-catch to handle connection failures
-- Set timeouts to avoid blocking forever
-- Consider DEALER-ROUTER for asynchronous scenarios
+- 항상 Send()와 RecvString()/RecvBytes()를 짝지어 사용
+- 연결 실패를 처리하기 위해 try-catch 사용
+- 무한 대기를 방지하기 위해 타임아웃 설정
+- 비동기 시나리오에는 DEALER-ROUTER 고려
 
-## Publish-Subscribe Pattern (PUB-SUB)
+## Publish-Subscribe 패턴 (PUB-SUB)
 
-The PUB-SUB pattern distributes messages from one publisher to many subscribers. Subscribers filter messages by topic.
+PUB-SUB 패턴은 하나의 퍼블리셔에서 여러 구독자로 메시지를 배포합니다. 구독자는 토픽으로 메시지를 필터링합니다.
 
-### Characteristics
+### 특징
 
-- **One-to-many**: Single publisher, multiple subscribers
-- **Topic-based**: Subscribers filter by prefix matching
-- **Fire-and-forget**: Publisher doesn't know who receives
-- **Late joiner problem**: Subscribers miss messages sent before subscription
+- **일대다 (One-to-many)**: 단일 퍼블리셔, 다수의 구독자
+- **토픽 기반 (Topic-based)**: 구독자는 접두사 매칭으로 필터링
+- **발사 후 망각 (Fire-and-forget)**: 퍼블리셔는 누가 받는지 모름
+- **늦은 합류 문제 (Late joiner problem)**: 구독자는 구독 전 전송된 메시지를 놓침
 
-### Example: Weather Updates
+### 예제: 날씨 업데이트
 
-**Publisher (PUB)**:
+**퍼블리셔 (PUB)**:
 ```csharp
 using Net.Zmq;
 
@@ -111,7 +111,7 @@ while (true)
 }
 ```
 
-**Subscriber (SUB)**:
+**구독자 (SUB)**:
 ```csharp
 using Net.Zmq;
 
@@ -138,9 +138,9 @@ while (true)
 }
 ```
 
-### Topic Filtering
+### 토픽 필터링
 
-Topics use prefix matching. A subscription to "A" will match "A", "AB", "ABC", etc.
+토픽은 접두사 매칭을 사용합니다. "A"를 구독하면 "A", "AB", "ABC" 등이 매칭됩니다.
 
 ```csharp
 // Subscribe to all messages
@@ -154,27 +154,27 @@ subscriber.Subscribe("stock.AAPL");
 subscriber.Unsubscribe("weather.");
 ```
 
-### Best Practices
+### 모범 사례
 
-- Always call Subscribe() before receiving messages
-- Use meaningful topic prefixes for filtering
-- Consider slow joiner problem (add sleep after bind/connect)
-- Publishers should be stable (bind), subscribers connect
+- 메시지를 받기 전에 항상 Subscribe() 호출
+- 필터링을 위해 의미 있는 토픽 접두사 사용
+- 느린 합류자 문제 고려 (bind/connect 후 sleep 추가)
+- 퍼블리셔는 안정적이어야 함 (bind), 구독자는 connect
 
-## Push-Pull Pattern (Pipeline)
+## Push-Pull 패턴 (파이프라인)
 
-The PUSH-PULL pattern creates a pipeline for distributing tasks to workers. Tasks are load-balanced automatically.
+PUSH-PULL 패턴은 워커에게 작업을 배포하는 파이프라인을 생성합니다. 작업은 자동으로 부하 분산됩니다.
 
-### Characteristics
+### 특징
 
-- **Load balancing**: Tasks distributed evenly among workers
-- **Fair queuing**: Workers receive tasks in round-robin
-- **One-way**: No replies sent back
-- **Reliable**: Messages queue if worker is busy
+- **부하 분산 (Load balancing)**: 작업이 워커 간 균등하게 배포
+- **공정 큐잉 (Fair queuing)**: 워커가 라운드 로빈으로 작업 수신
+- **단방향 (One-way)**: 응답을 보내지 않음
+- **안정적 (Reliable)**: 워커가 바쁘면 메시지가 대기열에 저장
 
-### Example: Parallel Task Processing
+### 예제: 병렬 작업 처리
 
-**Task Producer (PUSH)**:
+**작업 생산자 (PUSH)**:
 ```csharp
 using Net.Zmq;
 
@@ -193,7 +193,7 @@ for (int i = 0; i < 100; i++)
 }
 ```
 
-**Worker (PULL)**:
+**워커 (PULL)**:
 ```csharp
 using Net.Zmq;
 
@@ -216,9 +216,9 @@ while (true)
 }
 ```
 
-**Result Collector (Optional)**:
+**결과 수집기 (선택사항)**:
 
-For collecting results, use a separate PULL socket:
+결과를 수집하려면 별도의 PULL 소켓을 사용하세요:
 
 ```csharp
 // In worker, add a PUSH socket
@@ -239,20 +239,20 @@ while (true)
 }
 ```
 
-### Best Practices
+### 모범 사례
 
-- Producer binds, workers connect (allows dynamic scaling)
-- Use separate sockets for task distribution and result collection
-- Consider ventilator-worker-sink pattern for complete pipelines
-- Monitor queue sizes to detect slow workers
+- 생산자는 bind, 워커는 connect (동적 확장 가능)
+- 작업 배포와 결과 수집에 별도의 소켓 사용
+- 완전한 파이프라인을 위해 ventilator-worker-sink 패턴 고려
+- 느린 워커를 감지하기 위해 큐 크기 모니터링
 
-## Router-Dealer Pattern
+## Router-Dealer 패턴
 
-ROUTER and DEALER sockets provide asynchronous request-reply with advanced routing.
+ROUTER와 DEALER 소켓은 고급 라우팅 기능을 갖춘 비동기 request-reply를 제공합니다.
 
-### DEALER-DEALER (Asynchronous Request-Reply)
+### DEALER-DEALER (비동기 Request-Reply)
 
-DEALER sockets can send multiple requests without waiting for replies.
+DEALER 소켓은 응답을 기다리지 않고 여러 요청을 보낼 수 있습니다.
 
 ```csharp
 // Async server (DEALER)
@@ -276,9 +276,9 @@ for (int i = 0; i < 3; i++)
 }
 ```
 
-### ROUTER-ROUTER (Peer-to-Peer with Identity)
+### ROUTER-ROUTER (신원을 가진 피어 투 피어)
 
-ROUTER sockets add identity frames for explicit routing.
+ROUTER 소켓은 명시적 라우팅을 위해 신원 프레임을 추가합니다.
 
 ```csharp
 using System.Text;
@@ -318,25 +318,25 @@ var reply = peerB.RecvString();
 Console.WriteLine($"From {replyFrom}: {reply}");
 ```
 
-### Best Practices
+### 모범 사례
 
-- Always set explicit identities for ROUTER-ROUTER
-- First frame is always the identity (envelope)
-- Use SendFlags.SendMore for multi-frame messages
-- ROUTER is more complex; use REQ-REP or DEALER-REP for simpler cases
+- ROUTER-ROUTER에는 항상 명시적 신원 설정
+- 첫 번째 프레임은 항상 신원 (envelope)
+- 다중 프레임 메시지에는 SendFlags.SendMore 사용
+- ROUTER는 더 복잡함; 간단한 경우 REQ-REP 또는 DEALER-REP 사용
 
-## Pair Pattern (PAIR)
+## Pair 패턴 (PAIR)
 
-PAIR sockets create an exclusive connection between two endpoints.
+PAIR 소켓은 두 엔드포인트 간 독점적 연결을 생성합니다.
 
-### Characteristics
+### 특징
 
-- **Exclusive**: Only two endpoints can connect
-- **Bidirectional**: Both sides can send and receive
-- **No routing**: Direct peer-to-peer
-- **Mainly for inproc**: Best used for thread communication
+- **독점적 (Exclusive)**: 두 엔드포인트만 연결 가능
+- **양방향 (Bidirectional)**: 양측 모두 송수신 가능
+- **라우팅 없음 (No routing)**: 직접 피어 투 피어
+- **주로 inproc용 (Mainly for inproc)**: 스레드 통신에 최적
 
-### Example: Inter-thread Communication
+### 예제: 스레드 간 통신
 
 ```csharp
 using Net.Zmq;
@@ -373,51 +373,51 @@ thread1.Join();
 thread2.Join();
 ```
 
-### Best Practices
+### 모범 사례
 
-- Use PAIR primarily for inproc:// communication
-- For TCP, consider REQ-REP or other patterns
-- Ensure bind happens before connect
-- Not suitable for complex topologies
+- PAIR는 주로 inproc:// 통신에 사용
+- TCP의 경우 REQ-REP 또는 다른 패턴 고려
+- bind가 connect보다 먼저 발생하도록 보장
+- 복잡한 토폴로지에는 부적합
 
-## Pattern Selection Guide
+## 패턴 선택 가이드
 
-Choose the right pattern for your use case:
+사용 사례에 맞는 패턴을 선택하세요:
 
-| Scenario | Recommended Pattern |
+| 시나리오 | 권장 패턴 |
 |----------|-------------------|
-| Client-server with replies | REQ-REP or DEALER-REP |
-| Broadcast to many clients | PUB-SUB |
-| Distribute work to workers | PUSH-PULL (pipeline) |
-| Asynchronous client-server | DEALER-ROUTER |
-| Peer-to-peer messaging | ROUTER-ROUTER or PAIR |
-| Inter-thread communication | PAIR (inproc) |
-| Load balancing | PUSH-PULL or ROUTER-DEALER |
+| 응답이 있는 클라이언트-서버 | REQ-REP 또는 DEALER-REP |
+| 다수의 클라이언트에게 브로드캐스트 | PUB-SUB |
+| 워커에게 작업 배포 | PUSH-PULL (파이프라인) |
+| 비동기 클라이언트-서버 | DEALER-ROUTER |
+| 피어 투 피어 메시징 | ROUTER-ROUTER 또는 PAIR |
+| 스레드 간 통신 | PAIR (inproc) |
+| 부하 분산 | PUSH-PULL 또는 ROUTER-DEALER |
 
-## Advanced: Combining Patterns
+## 고급: 패턴 조합
 
-You can combine patterns for complex architectures:
+복잡한 아키텍처를 위해 패턴을 조합할 수 있습니다:
 
-### Majordomo Pattern (Broker)
+### Majordomo 패턴 (브로커)
 
-Broker sits between clients and workers:
+브로커가 클라이언트와 워커 사이에 위치:
 
 ```
 Client (REQ) → Broker (ROUTER-DEALER) → Worker (REP)
 ```
 
-### Paranoid Pirate Pattern
+### Paranoid Pirate 패턴
 
-Reliable request-reply with heartbeating:
+하트비트를 사용한 안정적인 request-reply:
 
 ```
 Client (REQ) → Load Balancer (ROUTER) → Workers (DEALER) with heartbeats
 ```
 
-See the [Advanced Topics](advanced-topics.md) guide for these patterns.
+이러한 패턴은 [고급 주제](advanced-topics.ko.md) 가이드를 참조하세요.
 
-## Next Steps
+## 다음 단계
 
-- Learn about [API Usage](api-usage.md) for detailed API documentation
-- Explore [Advanced Topics](advanced-topics.md) for complex patterns
-- Check the [API Reference](../api/index.html) for complete documentation
+- [API 사용법](api-usage.ko.md)에서 상세한 API 문서 학습
+- [고급 주제](advanced-topics.ko.md)에서 복잡한 패턴 탐색
+- [API 레퍼런스](../api/index.html)에서 완전한 문서 확인

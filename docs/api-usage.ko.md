@@ -1,14 +1,14 @@
 [![English](https://img.shields.io/badge/lang-en-red.svg)](api-usage.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](api-usage.ko.md)
 
-# API Usage Guide
+# API 사용 가이드
 
-This guide provides detailed documentation on using the core Net.Zmq API classes: Context, Socket, Message, and Poller.
+이 가이드는 Net.Zmq의 핵심 API 클래스인 Context, Socket, Message, Poller를 사용하는 방법에 대한 상세한 문서를 제공합니다.
 
 ## Context
 
-The `Context` class manages ZeroMQ resources, including I/O threads and sockets. Typically, you create one context per application.
+`Context` 클래스는 I/O 스레드와 소켓을 포함한 ZeroMQ 리소스를 관리합니다. 일반적으로 애플리케이션당 하나의 컨텍스트를 생성합니다.
 
-### Creating a Context
+### 컨텍스트 생성
 
 ```csharp
 using Net.Zmq;
@@ -20,9 +20,9 @@ using var context = new Context();
 using var context = new Context(ioThreads: 2, maxSockets: 2048);
 ```
 
-### Context Options
+### 컨텍스트 옵션
 
-You can configure the context using the `SetOption` and `GetOption` methods:
+`SetOption` 및 `GetOption` 메서드를 사용하여 컨텍스트를 구성할 수 있습니다:
 
 ```csharp
 using var context = new Context();
@@ -43,20 +43,20 @@ var maxSockets = context.GetOption(ContextOption.MaxSockets);
 Console.WriteLine($"I/O Threads: {ioThreads}, Max Sockets: {maxSockets}");
 ```
 
-### Available Context Options
+### 사용 가능한 컨텍스트 옵션
 
-| Option | Type | Description |
+| 옵션 | 타입 | 설명 |
 |--------|------|-------------|
-| `IoThreads` | int | Number of I/O threads (default: 1) |
-| `MaxSockets` | int | Maximum number of sockets (default: 1024) |
-| `MaxMsgsz` | int | Maximum message size in bytes (0 = unlimited) |
-| `SocketLimit` | int | Largest configurable max sockets value |
-| `Ipv6` | bool | Enable IPv6 support |
-| `Blocky` | bool | Use blocking shutdown behavior |
-| `ThreadPriority` | int | Thread scheduling priority |
-| `ThreadSchedPolicy` | int | Thread scheduling policy |
+| `IoThreads` | int | I/O 스레드 수 (기본값: 1) |
+| `MaxSockets` | int | 최대 소켓 수 (기본값: 1024) |
+| `MaxMsgsz` | int | 최대 메시지 크기 (바이트, 0 = 무제한) |
+| `SocketLimit` | int | 설정 가능한 최대 소켓 값 |
+| `Ipv6` | bool | IPv6 지원 활성화 |
+| `Blocky` | bool | 블로킹 종료 동작 사용 |
+| `ThreadPriority` | int | 스레드 스케줄링 우선순위 |
+| `ThreadSchedPolicy` | int | 스레드 스케줄링 정책 |
 
-### ZeroMQ Version and Capabilities
+### ZeroMQ 버전 및 기능
 
 ```csharp
 // Get ZeroMQ library version
@@ -71,9 +71,9 @@ bool hasGssapi = Context.Has("gssapi");     // GSSAPI auth support
 Console.WriteLine($"CURVE encryption: {hasCurve}");
 ```
 
-### Resource Management
+### 리소스 관리
 
-Always dispose the context when done:
+사용이 끝나면 항상 컨텍스트를 폐기하세요:
 
 ```csharp
 // Using statement (recommended)
@@ -93,9 +93,9 @@ finally
 
 ## Socket
 
-The `Socket` class represents a ZeroMQ socket endpoint for sending and receiving messages.
+`Socket` 클래스는 메시지를 송수신하기 위한 ZeroMQ 소켓 엔드포인트를 나타냅니다.
 
-### Creating Sockets
+### 소켓 생성
 
 ```csharp
 using var context = new Context();
@@ -112,7 +112,7 @@ using var router = new Socket(context, SocketType.Router); // Router
 using var pair = new Socket(context, SocketType.Pair);    // Pair
 ```
 
-### Connecting and Binding
+### 연결 및 바인딩
 
 ```csharp
 using var socket = new Socket(context, SocketType.Rep);
@@ -132,11 +132,11 @@ socket.Unbind("tcp://*:5555");
 socket.Disconnect("tcp://localhost:5555");
 ```
 
-### Sending Messages
+### 메시지 전송
 
-Net.Zmq provides multiple methods for sending messages:
+Net.Zmq는 메시지를 전송하기 위한 여러 메서드를 제공합니다:
 
-#### Send String
+#### 문자열 전송
 
 ```csharp
 // Simple string send
@@ -153,7 +153,7 @@ if (bytesSent != -1)
 }
 ```
 
-#### Send Bytes
+#### 바이트 배열 전송
 
 ```csharp
 // Send byte array
@@ -164,7 +164,7 @@ socket.Send(data);
 int bytesSent = socket.Send(data, SendFlags.DontWait); // -1 if would block
 ```
 
-#### Send Multi-part Messages
+#### 다중 파트 메시지 전송
 
 ```csharp
 // Send multi-part message
@@ -177,17 +177,17 @@ socket.Send(headerBytes, SendFlags.SendMore);
 socket.Send(bodyBytes);
 ```
 
-#### Send Flags
+#### 전송 플래그
 
-| Flag | Description |
+| 플래그 | 설명 |
 |------|-------------|
-| `None` | Blocking send |
-| `DontWait` | Non-blocking send |
-| `SendMore` | More message frames to follow |
+| `None` | 블로킹 전송 |
+| `DontWait` | 논블로킹 전송 |
+| `SendMore` | 추가 메시지 프레임이 따라옴 |
 
-### Receiving Messages
+### 메시지 수신
 
-#### Receive String
+#### 문자열 수신
 
 ```csharp
 // Blocking receive
@@ -204,7 +204,7 @@ if (received)
 }
 ```
 
-#### Receive Bytes
+#### 바이트 수신
 
 ```csharp
 // Receive into new array
@@ -223,7 +223,7 @@ if (received && result != null)
 }
 ```
 
-#### Receive Multi-part Messages
+#### 다중 파트 메시지 수신
 
 ```csharp
 // Check if more frames are available
@@ -243,16 +243,16 @@ do
 } while (socket.GetOption<bool>(SocketOption.RcvMore));
 ```
 
-#### Receive Flags
+#### 수신 플래그
 
-| Flag | Description |
+| 플래그 | 설명 |
 |------|-------------|
-| `None` | Blocking receive |
-| `DontWait` | Non-blocking receive |
+| `None` | 블로킹 수신 |
+| `DontWait` | 논블로킹 수신 |
 
-### Socket Options
+### 소켓 옵션
 
-Configure socket behavior using options:
+옵션을 사용하여 소켓 동작을 구성합니다:
 
 ```csharp
 using var socket = new Socket(context, SocketType.Rep);
@@ -273,21 +273,21 @@ int sendHwm = socket.GetOption<int>(SocketOption.Sndhwm);
 Console.WriteLine($"Linger: {linger}ms, Send HWM: {sendHwm}");
 ```
 
-### Common Socket Options
+### 일반적인 소켓 옵션
 
-| Option | Type | Description |
+| 옵션 | 타입 | 설명 |
 |--------|------|-------------|
-| `Linger` | int | Time to wait for pending messages on close (ms) |
-| `Sndhwm` | int | High water mark for outbound messages |
-| `Rcvhwm` | int | High water mark for inbound messages |
-| `Sndtimeo` | int | Send timeout in milliseconds |
-| `Rcvtimeo` | int | Receive timeout in milliseconds |
-| `Sndbuf` | int | Kernel send buffer size |
-| `Rcvbuf` | int | Kernel receive buffer size |
-| `Routing_Id` | byte[] | Socket identity for ROUTER sockets |
-| `RcvMore` | bool | More message frames available |
+| `Linger` | int | 닫을 때 대기 중인 메시지를 기다리는 시간 (ms) |
+| `Sndhwm` | int | 아웃바운드 메시지의 고수위 마크 (High Water Mark) |
+| `Rcvhwm` | int | 인바운드 메시지의 고수위 마크 |
+| `Sndtimeo` | int | 전송 타임아웃 (밀리초) |
+| `Rcvtimeo` | int | 수신 타임아웃 (밀리초) |
+| `Sndbuf` | int | 커널 전송 버퍼 크기 |
+| `Rcvbuf` | int | 커널 수신 버퍼 크기 |
+| `Routing_Id` | byte[] | ROUTER 소켓의 소켓 신원 |
+| `RcvMore` | bool | 추가 메시지 프레임 사용 가능 여부 |
 
-### Subscribe/Unsubscribe (SUB sockets only)
+### Subscribe/Unsubscribe (SUB 소켓 전용)
 
 ```csharp
 using var subscriber = new Socket(context, SocketType.Sub);
@@ -304,9 +304,9 @@ subscriber.Unsubscribe("weather.");
 
 ## Message
 
-The `Message` class provides low-level control over message frames.
+`Message` 클래스는 메시지 프레임에 대한 저수준 제어를 제공합니다.
 
-### Creating Messages
+### 메시지 생성
 
 ```csharp
 using Net.Zmq;
@@ -325,7 +325,7 @@ using var msg3 = new Message(data);
 using var msg4 = new Message(1024); // Allocates 1KB
 ```
 
-### Message Properties
+### 메시지 속성
 
 ```csharp
 using var message = new Message("Hello");
@@ -347,7 +347,7 @@ byte[] bytes = message.ToByteArray();
 bool hasMore = message.More;
 ```
 
-### Sending Messages
+### 메시지 전송
 
 ```csharp
 using var message = new Message("Hello World");
@@ -363,7 +363,7 @@ socket.Send(ref header, SendFlags.SendMore);
 socket.Send(ref body, SendFlags.None);
 ```
 
-### Receiving Messages
+### 메시지 수신
 
 ```csharp
 using var message = new Message();
@@ -384,7 +384,7 @@ if (received)
 }
 ```
 
-### Message Metadata
+### 메시지 메타데이터
 
 ```csharp
 using var message = new Message();
@@ -400,9 +400,9 @@ if (property != null)
 
 ## Poller
 
-The `Poller` class enables multiplexing I/O events across multiple sockets using an instance-based API.
+`Poller` 클래스는 인스턴스 기반 API를 사용하여 여러 소켓에 대한 I/O 이벤트 다중화를 가능하게 합니다.
 
-### Creating a Poller
+### Poller 생성
 
 ```csharp
 using Net.Zmq;
@@ -411,7 +411,7 @@ using Net.Zmq;
 using var poller = new Poller(capacity: 2);
 ```
 
-### Basic Polling
+### 기본 폴링
 
 ```csharp
 using Net.Zmq;
@@ -455,7 +455,7 @@ while (true)
 }
 ```
 
-### Poll Events
+### 폴 이벤트
 
 ```csharp
 using var poller = new Poller(capacity: 4);
@@ -475,7 +475,7 @@ if (poller.IsReadable(idx3) || poller.IsWritable(idx3)) { /* Handle both */ }
 if (poller.HasError(idx4)) { /* Handle error */ }
 ```
 
-### Updating Events
+### 이벤트 업데이트
 
 ```csharp
 using var poller = new Poller(capacity: 2);
@@ -490,7 +490,7 @@ poller.Update(idx, PollEvents.In | PollEvents.Out);
 poller.Update(idx, PollEvents.Out);
 ```
 
-### Poll Timeout
+### 폴 타임아웃
 
 ```csharp
 using var poller = new Poller(capacity: 2);
@@ -507,7 +507,7 @@ poller.Poll(timeout: 0);
 poller.Poll(timeout: 5000);
 ```
 
-### Clearing and Reusing Poller
+### Poller 정리 및 재사용
 
 ```csharp
 using var poller = new Poller(capacity: 2);
@@ -527,7 +527,7 @@ int idx3 = poller.Add(socket3, PollEvents.In);
 int idx4 = poller.Add(socket4, PollEvents.In);
 ```
 
-### Advanced Polling Example
+### 고급 폴링 예제
 
 ```csharp
 using Net.Zmq;
@@ -579,32 +579,32 @@ while (running)
 }
 ```
 
-### Poller API Reference
+### Poller API 레퍼런스
 
-| Method | Description |
+| 메서드 | 설명 |
 |--------|-------------|
-| `Poller(int capacity)` | Creates a Poller with specified maximum socket capacity |
-| `Add(Socket, PollEvents)` | Adds a socket to the poller and returns its index |
-| `Update(int index, PollEvents)` | Updates poll events for the socket at the given index |
-| `Poll(long timeout)` | Waits for events on registered sockets (timeout in milliseconds, -1 = infinite) |
-| `IsReadable(int index)` | Checks if the socket at the given index is readable |
-| `IsWritable(int index)` | Checks if the socket at the given index is writable |
-| `HasError(int index)` | Checks if the socket at the given index has an error |
-| `Clear()` | Removes all registered sockets from the poller |
-| `Dispose()` | Releases resources used by the poller |
+| `Poller(int capacity)` | 지정된 최대 소켓 용량으로 Poller 생성 |
+| `Add(Socket, PollEvents)` | 폴러에 소켓을 추가하고 인덱스 반환 |
+| `Update(int index, PollEvents)` | 주어진 인덱스의 소켓에 대한 폴 이벤트 업데이트 |
+| `Poll(long timeout)` | 등록된 소켓의 이벤트 대기 (타임아웃 밀리초, -1 = 무한대) |
+| `IsReadable(int index)` | 주어진 인덱스의 소켓이 읽기 가능한지 확인 |
+| `IsWritable(int index)` | 주어진 인덱스의 소켓이 쓰기 가능한지 확인 |
+| `HasError(int index)` | 주어진 인덱스의 소켓에 오류가 있는지 확인 |
+| `Clear()` | 폴러에서 등록된 모든 소켓 제거 |
+| `Dispose()` | 폴러가 사용하는 리소스 해제 |
 
-### PollEvents Flags
+### PollEvents 플래그
 
-| Flag | Description |
+| 플래그 | 설명 |
 |------|-------------|
-| `None` | No events |
-| `In` | Socket is readable (incoming messages available) |
-| `Out` | Socket is writable (can send messages without blocking) |
-| `Err` | Socket has an error condition |
+| `None` | 이벤트 없음 |
+| `In` | 소켓이 읽기 가능 (수신 메시지 사용 가능) |
+| `Out` | 소켓이 쓰기 가능 (블로킹 없이 메시지 전송 가능) |
+| `Err` | 소켓에 오류 조건 발생 |
 
-## Error Handling
+## 오류 처리
 
-Net.Zmq throws exceptions for errors:
+Net.Zmq는 오류에 대해 예외를 발생시킵니다:
 
 ```csharp
 using Net.Zmq;
@@ -641,41 +641,41 @@ catch (Exception ex)
 }
 ```
 
-## Best Practices
+## 모범 사례
 
 ### Context
 
-- Create one context per application
-- Dispose context only after all sockets are closed
-- Set I/O threads based on CPU cores (typically 1 per 4 cores)
+- 애플리케이션당 하나의 컨텍스트 생성
+- 모든 소켓이 닫힌 후에만 컨텍스트 폐기
+- CPU 코어 기반으로 I/O 스레드 설정 (일반적으로 코어 4개당 1개)
 
 ### Socket
 
-- Always use `using` statements for automatic disposal
-- Set timeouts to prevent indefinite blocking
-- Configure high water marks to prevent memory issues
-- Use appropriate socket types for your pattern
+- 자동 폐기를 위해 항상 `using` 문 사용
+- 무한 블로킹을 방지하기 위해 타임아웃 설정
+- 메모리 문제를 방지하기 위해 고수위 마크 구성
+- 패턴에 적합한 소켓 타입 사용
 
 ### Message
 
-- Use string/byte methods for simple cases
-- Use Message class for zero-copy scenarios
-- Always dispose messages explicitly
-- Avoid copying large message data unnecessarily
+- 간단한 경우 문자열/바이트 메서드 사용
+- 제로카피 시나리오에는 Message 클래스 사용
+- 항상 메시지를 명시적으로 폐기
+- 큰 메시지 데이터를 불필요하게 복사하지 않음
 
 ### Poller
 
-- Create Poller instances with appropriate capacity
-- Store socket indices returned by Add() for event checking
-- Use polling for multiple socket I/O multiplexing
-- Set reasonable timeout values (-1 for infinite, 0 for non-blocking, positive for timeout)
-- Handle all possible events (IsReadable, IsWritable, HasError)
-- Use Update() to change events without removing and re-adding sockets
-- Call Clear() to reset and reuse the same Poller instance
-- Always dispose Poller instances when done
+- 적절한 용량으로 Poller 인스턴스 생성
+- 이벤트 확인을 위해 Add()가 반환한 소켓 인덱스 저장
+- 다중 소켓 I/O 다중화에 폴링 사용
+- 합리적인 타임아웃 값 설정 (-1은 무한대, 0은 논블로킹, 양수는 타임아웃)
+- 모든 가능한 이벤트 처리 (IsReadable, IsWritable, HasError)
+- 소켓을 제거하고 다시 추가하지 않고 Update()를 사용하여 이벤트 변경
+- 리셋하고 동일한 Poller 인스턴스를 재사용하려면 Clear() 호출
+- 사용이 끝나면 항상 Poller 인스턴스 폐기
 
-## Next Steps
+## 다음 단계
 
-- Explore [Messaging Patterns](patterns.md) for practical examples
-- Read [Advanced Topics](advanced-topics.md) for performance optimization
-- Browse the [API Reference](../api/index.html) for complete documentation
+- [메시징 패턴](patterns.ko.md)에서 실용적인 예제 탐색
+- [고급 주제](advanced-topics.ko.md)에서 성능 최적화 읽기
+- [API 레퍼런스](../api/index.html)에서 완전한 문서 탐색

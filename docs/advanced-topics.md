@@ -1,3 +1,5 @@
+[![English](https://img.shields.io/badge/lang-en-red.svg)](advanced-topics.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](advanced-topics.ko.md)
+
 # Advanced Topics
 
 This guide covers advanced Net.Zmq topics including performance optimization, best practices, security, and troubleshooting.
