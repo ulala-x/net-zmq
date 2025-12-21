@@ -8,30 +8,30 @@
 [![Documentation](https://img.shields.io/badge/docs-online-blue.svg)](https://ulala-x.github.io/net-zmq/)
 [![Changelog](https://img.shields.io/badge/changelog-v0.1.0-green.svg)](CHANGELOG.md)
 
-A modern .NET 8+ binding for ZeroMQ (libzmq) with cppzmq-style API.
+cppzmq 스타일 API를 제공하는 현대적인 .NET 8+ ZeroMQ (libzmq) 바인딩입니다.
 
-## Features
+## 주요 기능
 
-- **Modern .NET**: Built for .NET 8.0+ with `[LibraryImport]` source generators (no runtime marshalling overhead)
-- **cppzmq Style**: Familiar API for developers coming from C++
-- **Type Safe**: Strongly-typed socket options, message properties, and enums
-- **Cross-Platform**: Supports Windows, Linux, and macOS (x64, ARM64)
-- **Safe by Default**: SafeHandle-based resource management
+- **모던 .NET**: `[LibraryImport]` 소스 생성기를 사용하는 .NET 8.0+ 빌드 (런타임 마샬링 오버헤드 없음)
+- **cppzmq 스타일**: C++에서 넘어온 개발자에게 익숙한 API
+- **타입 안전성**: 강타입 소켓 옵션, 메시지 속성, 열거형
+- **크로스 플랫폼**: Windows, Linux, macOS (x64, ARM64) 지원
+- **안전한 기본값**: SafeHandle 기반 리소스 관리
 
-## Installation
+## 설치
 
 ```bash
 dotnet add package Net.Zmq
 ```
 
-## Quick Start
+## 빠른 시작
 
-### REQ-REP Pattern
+### REQ-REP 패턴
 
 ```csharp
 using Net.Zmq;
 
-// Server
+// 서버
 using var ctx = new Context();
 using var server = new Socket(ctx, SocketType.Rep);
 server.Bind("tcp://*:5555");
@@ -39,32 +39,32 @@ server.Bind("tcp://*:5555");
 var request = server.RecvString();
 server.Send("World");
 
-// Client
+// 클라이언트
 using var client = new Socket(ctx, SocketType.Req);
 client.Connect("tcp://localhost:5555");
 client.Send("Hello");
 var reply = client.RecvString();
 ```
 
-### PUB-SUB Pattern
+### PUB-SUB 패턴
 
 ```csharp
 using Net.Zmq;
 
-// Publisher
+// 퍼블리셔
 using var ctx = new Context();
 using var pub = new Socket(ctx, SocketType.Pub);
 pub.Bind("tcp://*:5556");
 pub.Send("topic1 Hello subscribers!");
 
-// Subscriber
+// 서브스크라이버
 using var sub = new Socket(ctx, SocketType.Sub);
 sub.Connect("tcp://localhost:5556");
 sub.Subscribe("topic1");
 var message = sub.RecvString();
 ```
 
-### Router-to-Router Pattern
+### Router-to-Router 패턴
 
 ```csharp
 using System.Text;
@@ -74,43 +74,43 @@ using var ctx = new Context();
 using var peerA = new Socket(ctx, SocketType.Router);
 using var peerB = new Socket(ctx, SocketType.Router);
 
-// Set explicit identities for Router-to-Router
+// Router-to-Router를 위한 명시적 식별자 설정
 peerA.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_A"));
 peerB.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_B"));
 
 peerA.Bind("tcp://127.0.0.1:5555");
 peerB.Connect("tcp://127.0.0.1:5555");
 
-// Peer B sends to Peer A (first frame = target identity)
+// Peer B가 Peer A로 전송 (첫 번째 프레임 = 대상 식별자)
 peerB.Send(Encoding.UTF8.GetBytes("PEER_A"), SendFlags.SendMore);
 peerB.Send("Hello from Peer B!");
 
-// Peer A receives (first frame = sender identity)
+// Peer A가 수신 (첫 번째 프레임 = 발신자 식별자)
 var senderId = Encoding.UTF8.GetString(peerA.RecvBytes());
 var message = peerA.RecvString();
 
-// Peer A replies using sender's identity
+// Peer A가 발신자의 식별자를 사용하여 응답
 peerA.Send(Encoding.UTF8.GetBytes(senderId), SendFlags.SendMore);
 peerA.Send("Hello back from Peer A!");
 ```
 
-### Polling
+### 폴링
 
 ```csharp
 using Net.Zmq;
 
-// Create Poller instance
+// Poller 인스턴스 생성
 using var poller = new Poller(capacity: 2);
 
-// Add sockets and store their indices
+// 소켓 추가 및 인덱스 저장
 int idx1 = poller.Add(socket1, PollEvents.In);
 int idx2 = poller.Add(socket2, PollEvents.In);
 
-// Poll for events
+// 이벤트 폴링
 if (poller.Poll(timeout: 1000) > 0)
 {
-    if (poller.IsReadable(idx1)) { /* handle socket1 */ }
-    if (poller.IsReadable(idx2)) { /* handle socket2 */ }
+    if (poller.IsReadable(idx1)) { /* socket1 처리 */ }
+    if (poller.IsReadable(idx2)) { /* socket2 처리 */ }
 }
 ```
 
@@ -119,43 +119,43 @@ if (poller.Poll(timeout: 1000) > 0)
 ```csharp
 using Net.Zmq;
 
-// Create and send message
+// 메시지 생성 및 전송
 using var msg = new Message("Hello World");
 socket.Send(ref msg, SendFlags.None);
 
-// Receive message
+// 메시지 수신
 using var reply = new Message();
 socket.Recv(ref reply, RecvFlags.None);
 Console.WriteLine(reply.ToString());
 ```
 
-## Socket Types
+## 소켓 타입
 
-| Type | Description |
-|------|-------------|
-| `SocketType.Req` | Request socket (client) |
-| `SocketType.Rep` | Reply socket (server) |
-| `SocketType.Pub` | Publish socket |
-| `SocketType.Sub` | Subscribe socket |
-| `SocketType.Push` | Push socket (pipeline) |
-| `SocketType.Pull` | Pull socket (pipeline) |
-| `SocketType.Dealer` | Async request |
-| `SocketType.Router` | Async reply |
-| `SocketType.Pair` | Exclusive pair |
+| 타입 | 설명 |
+|------|------|
+| `SocketType.Req` | Request 소켓 (클라이언트) |
+| `SocketType.Rep` | Reply 소켓 (서버) |
+| `SocketType.Pub` | Publish 소켓 |
+| `SocketType.Sub` | Subscribe 소켓 |
+| `SocketType.Push` | Push 소켓 (파이프라인) |
+| `SocketType.Pull` | Pull 소켓 (파이프라인) |
+| `SocketType.Dealer` | 비동기 요청 |
+| `SocketType.Router` | 비동기 응답 |
+| `SocketType.Pair` | 독점 페어 |
 
-## API Reference
+## API 레퍼런스
 
 ### Context
 
 ```csharp
-var ctx = new Context();                           // Default
-var ctx = new Context(ioThreads: 2, maxSockets: 1024);  // Custom
+var ctx = new Context();                           // 기본값
+var ctx = new Context(ioThreads: 2, maxSockets: 1024);  // 커스텀
 
 ctx.SetOption(ContextOption.IoThreads, 4);
 var threads = ctx.GetOption(ContextOption.IoThreads);
 
-var (major, minor, patch) = Context.Version;       // Get ZMQ version
-bool hasCurve = Context.Has("curve");              // Check capability
+var (major, minor, patch) = Context.Version;       // ZMQ 버전 가져오기
+bool hasCurve = Context.Has("curve");              // 기능 확인
 ```
 
 ### Socket
@@ -163,43 +163,43 @@ bool hasCurve = Context.Has("curve");              // Check capability
 ```csharp
 var socket = new Socket(ctx, SocketType.Req);
 
-// Connection
+// 연결
 socket.Bind("tcp://*:5555");
 socket.Connect("tcp://localhost:5555");
 socket.Unbind("tcp://*:5555");
 socket.Disconnect("tcp://localhost:5555");
 
-// Send
+// 전송
 socket.Send("Hello");
 socket.Send(byteArray);
 socket.Send(ref message, SendFlags.SendMore);
-int result = socket.Send(data, SendFlags.DontWait); // -1 if would block
+int result = socket.Send(data, SendFlags.DontWait); // 블록되면 -1 반환
 
-// Receive
+// 수신
 string str = socket.RecvString();
 byte[] data = socket.Recv(buffer);
 socket.Recv(ref message);
 bool received = socket.TryRecvString(out string? result);
 
-// Options
+// 옵션
 socket.SetOption(SocketOption.Linger, 0);
 int linger = socket.GetOption<int>(SocketOption.Linger);
 ```
 
-## Performance
+## 성능
 
-Net.Zmq offers multiple strategies for high-performance messaging. Choose the right approach based on your use case.
+Net.Zmq는 고성능 메시징을 위한 여러 전략을 제공합니다. 사용 사례에 따라 적절한 방법을 선택하세요.
 
-### Quick Start Guide
+### 빠른 시작 가이드
 
-**Sending Messages:**
+**메시지 전송:**
 
-1. **Small Messages (≤512B)** - Use ArrayPool for best performance:
+1. **작은 메시지 (≤512B)** - 최고의 성능을 위해 ArrayPool 사용:
    ```csharp
    var buffer = ArrayPool<byte>.Shared.Rent(size);
    try
    {
-       // Fill buffer with data
+       // 버퍼에 데이터 채우기
        socket.Send(buffer.AsSpan(0, size));
    }
    finally
@@ -208,7 +208,7 @@ Net.Zmq offers multiple strategies for high-performance messaging. Choose the ri
    }
    ```
 
-2. **Large Messages (>512B)** - Use MessageZeroCopy for zero-copy:
+2. **큰 메시지 (>512B)** - 제로카피를 위해 MessageZeroCopy 사용:
    ```csharp
    nint nativePtr = Marshal.AllocHGlobal(dataSize);
    unsafe
@@ -220,7 +220,7 @@ Net.Zmq offers multiple strategies for high-performance messaging. Choose the ri
    socket.Send(msg);
    ```
 
-**Receiving Messages:**
+**메시지 수신:**
 
 ```csharp
 using var poller = new Poller(1);
@@ -230,63 +230,63 @@ using var msg = new Message();
 if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 {
     socket.Recv(ref msg, RecvFlags.None);
-    // Process msg.Data
+    // msg.Data 처리
 }
 ```
 
-### Benchmark Results Summary
+### 벤치마크 결과 요약
 
-| Message Size | Best Send Strategy | Throughput | Best Receive Mode | Throughput |
-|--------------|-------------------|------------|-------------------|------------|
+| 메시지 크기 | 최적 전송 전략 | 처리량 | 최적 수신 모드 | 처리량 |
+|------------|--------------|--------|--------------|--------|
 | **64 bytes** | ArrayPool | 4,120 K/sec | Blocking | 4,570 K/sec |
 | **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 2,120 K/sec |
 | **1 KB** | ArrayPool | 1,110 K/sec | Blocking | 1,330 K/sec |
 | **64 KB** | Message | 83.9 K/sec | Blocking | 71.5 K/sec |
 
-**Key Insights:**
+**핵심 인사이트:**
 
-- **Send Strategies:**
-  - Small messages (≤512B): ArrayPool is fastest (1-5% faster) with 99.98-99.99% less allocation
-  - Large messages (≥64KB): Message is fastest (16% faster) with 99.95% less allocation
+- **전송 전략:**
+  - 작은 메시지 (≤512B): ArrayPool이 가장 빠름 (1-5% 빠름), 할당 99.98-99.99% 감소
+  - 큰 메시지 (≥64KB): Message가 가장 빠름 (16% 빠름), 할당 99.95% 감소
 
-- **Receive Modes:**
-  - Blocking and Poller modes perform nearly identically (0-6% difference)
-  - Use Poller for consistent API and multi-socket support
-  - NonBlocking mode is 25-86% slower (avoid in production)
+- **수신 모드:**
+  - Blocking과 Poller 모드는 거의 동일한 성능 (0-6% 차이)
+  - 일관된 API와 다중 소켓 지원을 위해 Poller 사용 권장
+  - NonBlocking 모드는 25-86% 느림 (프로덕션 환경에서 사용 지양)
 
-**Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
+**테스트 환경**: Intel Core Ultra 7 265K (20코어), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-For detailed benchmark results, usage examples, and decision flowcharts, see [benchmarks/Net.Zmq.Benchmarks/README.md](benchmarks/Net.Zmq.Benchmarks/README.md).
+자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [benchmarks/Net.Zmq.Benchmarks/README.md](benchmarks/Net.Zmq.Benchmarks/README.md)를 참조하세요.
 
-## Supported Platforms
+## 지원 플랫폼
 
-| OS | Architecture |
-|----|--------------|
+| OS | 아키텍처 |
+|----|---------|
 | Windows | x64, ARM64 |
 | Linux | x64, ARM64 |
 | macOS | x64, ARM64 |
 
-## Documentation
+## 문서
 
-Complete API documentation is available at: [https://ulala-x.github.io/net-zmq/](https://ulala-x.github.io/net-zmq/)
+완전한 API 문서는 [https://ulala-x.github.io/net-zmq/](https://ulala-x.github.io/net-zmq/)에서 확인하실 수 있습니다.
 
-The documentation includes:
-- API Reference for all classes and methods
-- Usage examples and patterns
-- Performance benchmarks
-- Platform-specific guides
+문서 내용:
+- 모든 클래스와 메서드의 API 레퍼런스
+- 사용 예제 및 패턴
+- 성능 벤치마크
+- 플랫폼별 가이드
 
-## Requirements
+## 요구사항
 
-- .NET 8.0 or later
-- Native libzmq library (automatically provided via Net.Zmq.Native package)
+- .NET 8.0 이상
+- 네이티브 libzmq 라이브러리 (Net.Zmq.Native 패키지를 통해 자동으로 제공됨)
 
-## License
+## 라이선스
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - 자세한 내용은 [LICENSE](LICENSE)를 참조하세요.
 
-## Related Projects
+## 관련 프로젝트
 
-- [libzmq](https://github.com/zeromq/libzmq) - ZeroMQ core library
-- [cppzmq](https://github.com/zeromq/cppzmq) - C++ binding (API inspiration)
-- [libzmq-native](https://github.com/ulala-x/libzmq-native) - Native binaries
+- [libzmq](https://github.com/zeromq/libzmq) - ZeroMQ 코어 라이브러리
+- [cppzmq](https://github.com/zeromq/cppzmq) - C++ 바인딩 (API 영감)
+- [libzmq-native](https://github.com/ulala-x/libzmq-native) - 네이티브 바이너리
