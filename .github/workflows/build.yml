@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  build-windows:
-    runs-on: windows-2022
+  build:
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
 
@@ -17,18 +17,43 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    - name: Verify native library exists
-      run: |
-        dir native\runtimes\win-x64\native\
-      shell: cmd
-
     - name: Restore
       run: dotnet restore
 
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
-    - name: Verify native library copied
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: |
+          src/*/bin/Release/
+          tests/*/bin/Release/
+          native/
+
+  test-windows:
+    runs-on: windows-2022
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Verify native library exists
+      run: |
+        dir native\runtimes\win-x64\native\
+      shell: cmd
+
+    - name: Verify build artifacts
       run: |
         echo "=== Net.Zmq.Tests output ==="
         dir tests\Net.Zmq.Tests\bin\Release\net8.0\*.dll | findstr libzmq
@@ -45,8 +70,9 @@ jobs:
     - name: Test Core
       run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
-  build-linux:
-    runs-on: ubuntu-22.04
+  test-windows-arm64:
+    runs-on: windows-2022-arm64
+    needs: build
     steps:
     - uses: actions/checkout@v4
 
@@ -54,6 +80,49 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Verify native library exists
+      run: |
+        dir native\runtimes\win-arm64\native\
+      shell: cmd
+
+    - name: Verify build artifacts
+      run: |
+        echo "=== Net.Zmq.Tests output ==="
+        dir tests\Net.Zmq.Tests\bin\Release\net8.0\*.dll | findstr libzmq
+        echo "=== Net.Zmq.Core.Tests output ==="
+        dir tests\Net.Zmq.Core.Tests\bin\Release\net8.0\*.dll | findstr libzmq
+      shell: cmd
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-linux:
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
 
     - name: Set native library permissions
       run: |
@@ -62,13 +131,7 @@ jobs:
         echo "=== Library dependencies ==="
         ldd native/runtimes/linux-x64/native/libzmq.so || true
 
-    - name: Restore
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Verify native library copied
+    - name: Verify build artifacts
       run: |
         echo "=== Net.Zmq.Tests output ==="
         ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
@@ -84,8 +147,9 @@ jobs:
     - name: Test Core
       run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
-  build-linux-arm64:
+  test-linux-arm64:
     runs-on: ubuntu-22.04-arm
+    needs: build
     steps:
     - uses: actions/checkout@v4
 
@@ -93,6 +157,11 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
 
     - name: Set native library permissions
       run: |
@@ -101,13 +170,7 @@ jobs:
         echo "=== Library dependencies ==="
         ldd native/runtimes/linux-arm64/native/libzmq.so || true
 
-    - name: Restore
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Verify native library copied
+    - name: Verify build artifacts
       run: |
         echo "=== Net.Zmq.Tests output ==="
         ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.so' || echo "No libzmq found"
@@ -123,8 +186,9 @@ jobs:
     - name: Test Core
       run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
-  build-macos-arm64:
+  test-macos-arm64:
     runs-on: macos-15
+    needs: build
     steps:
     - uses: actions/checkout@v4
 
@@ -132,6 +196,11 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
 
     - name: Prepare native library
       run: |
@@ -141,13 +210,7 @@ jobs:
         echo "=== Library dependencies ==="
         otool -L native/runtimes/osx-arm64/native/libzmq.dylib || true
 
-    - name: Restore
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
-
-    - name: Verify native library copied
+    - name: Verify build artifacts
       run: |
         echo "=== Net.Zmq.Tests output ==="
         ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
@@ -163,8 +226,9 @@ jobs:
     - name: Test Core
       run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
 
-  build-macos-x64:
+  test-macos-x64:
     runs-on: macos-15
+    needs: build
     steps:
     - uses: actions/checkout@v4
 
@@ -177,6 +241,11 @@ jobs:
       run: |
         arch -x86_64 ~/.dotnet-x64/dotnet --info | head -20
 
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
     - name: Prepare native library
       run: |
         chmod +x native/runtimes/osx-x64/native/libzmq.dylib
@@ -185,13 +254,7 @@ jobs:
         echo "=== Library dependencies ==="
         otool -L native/runtimes/osx-x64/native/libzmq.dylib || true
 
-    - name: Restore
-      run: arch -x86_64 ~/.dotnet-x64/dotnet restore
-
-    - name: Build
-      run: arch -x86_64 ~/.dotnet-x64/dotnet build --configuration Release --no-restore
-
-    - name: Verify native library copied
+    - name: Verify build artifacts
       run: |
         echo "=== Net.Zmq.Tests output ==="
         ls -la tests/Net.Zmq.Tests/bin/Release/net8.0/ | grep -E 'libzmq|\.dylib' || echo "No libzmq found"
@@ -209,7 +272,7 @@ jobs:
 
   pack:
     runs-on: ubuntu-22.04
-    needs: [build-windows, build-linux, build-linux-arm64, build-macos-arm64, build-macos-x64]
+    needs: [test-windows, test-windows-arm64, test-linux, test-linux-arm64, test-macos-arm64, test-macos-x64]
     steps:
     - uses: actions/checkout@v4
 
@@ -218,11 +281,10 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    - name: Restore
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
 
     - name: Pack
       run: dotnet pack --configuration Release --no-build --output ./artifacts
