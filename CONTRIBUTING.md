@@ -1,5 +1,7 @@
 # Contributing to NetZeroMQ
 
+[![English](https://img.shields.io/badge/lang-en-red.svg)](CONTRIBUTING.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](CONTRIBUTING.ko.md)
+
 Thank you for your interest in contributing to NetZeroMQ! This document provides guidelines and information for contributors.
 
 ## Getting Started

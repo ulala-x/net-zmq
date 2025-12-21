@@ -1,3 +1,5 @@
+[![English](https://img.shields.io/badge/lang-en-red.svg)](index.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](index.ko.md)
+
 # Net.Zmq
 
 [![Build and Test](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml/badge.svg)](https://github.com/ulala-x/net-zmq/actions/workflows/build.yml)
