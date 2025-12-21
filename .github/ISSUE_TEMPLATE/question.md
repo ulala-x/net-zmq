@@ -6,6 +6,8 @@ labels: question
 assignees: ''
 ---
 
+[![English](https://img.shields.io/badge/lang-en-red.svg)](question.md) [![한국어](https://img.shields.io/badge/lang-ko-blue.svg)](question.ko.md)
+
 ## Question
 Your question here.
 
