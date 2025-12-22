@@ -75,11 +75,11 @@ Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 
 
 #### NonBlocking 모드 - 폴링 패턴 (바쁜 대기)
 
-**API**: `socket.TryRecv()`
+**API**: `socket.Recv(..., RecvFlags.DontWait)`
 
 **내부 메커니즘**:
 1. 사용자 공간에서 반복 루프
-2. `TryRecv()`가 메시지 확인 (사용 가능하지 않으면 내부적으로 `EAGAIN`/`EWOULDBLOCK` 반환)
+2. `Recv(RecvFlags.DontWait)`가 메시지 확인 (사용 가능하지 않으면 내부적으로 `EAGAIN`/`EWOULDBLOCK` 반환)
 3. 메시지가 없으면 즉시 `false` 반환
 4. 사용자 코드가 재시도 전에 `Thread.Sleep(1ms)` 호출
 5. 커널 지원 없이 루프 계속
@@ -87,7 +87,7 @@ Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 
 **특징**:
 - **커널 레벨 대기 없음** - 모든 폴링이 사용자 공간에서 발생
 - `Thread.Sleep(1ms)`가 CPU 사용량을 줄이지만 지연 오버헤드 추가 (1.3-1.7배 느림)
-- **프로덕션에 권장하지 않음** 성능이 좋지 않음
+- **상대적으로 성능이 떨어지므로 굳이 사용할 필요가 없음**
 
 #### Blocking과 Poller가 효율적인 이유
 
@@ -95,7 +95,8 @@ Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 
 |------|-----------------|----------------|------------|------------|
 | **Blocking** | 커널 공간 | 커널 인터럽트 | 0% | ✓ 단일 소켓에 최적 |
 | **Poller** | 커널 공간 | 커널 (epoll/kqueue) | 0% | ✓ 다중 소켓에 최적 |
-| **NonBlocking** | 사용자 공간 | 없음 (지속적 폴링) | 낮음 (Sleep 1ms) | ✗ 성능 좋지 않음 |
+| **NonBlocking** | 사용자 공간 | 없음 (지속적 폴링) | 낮음 (Sleep 1ms) | ✗ 상대적 성능 저하 |
+ 
 
 **핵심 통찰**: Blocking과 Poller는 대기를 커널에 위임하며, 커널은:
 - 하드웨어 인터럽트를 사용하여 데이터 도착을 즉시 감지
@@ -163,13 +164,13 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 **Blocking vs Poller**: 성능은 모든 메시지 크기에서 거의 동일합니다(96-106% 상대 성능). 작은 메시지(64B-1KB)의 경우 Poller가 Blocking보다 0-4% 빠릅니다. 큰 메시지(65KB)의 경우 Blocking이 Poller보다 1% 빠릅니다. 두 모드 모두 메시지가 도착할 때 스레드를 효율적으로 깨우는 커널 레벨 대기 메커니즘을 사용합니다. Poller는 폴링 인프라로 인해 약간 더 많은 메모리(10K 메시지당 456-640바이트 vs 336-664바이트)를 할당하지만, 실제로는 차이가 무시할 만합니다.
 
 **NonBlocking 성능**: `Thread.Sleep(1ms)`를 사용한 NonBlocking 모드는 다음 이유로 Blocking 및 Poller 모드보다 일관되게 느립니다(1.25-1.86배 느림):
-1. `TryRecv()`를 사용한 사용자 공간 폴링은 커널 레벨 블로킹에 비해 오버헤드 발생
+1. `Recv(RecvFlags.DontWait)`를 사용한 사용자 공간 폴링은 커널 레벨 블로킹에 비해 오버헤드 발생
 2. Thread.Sleep()은 최소 1ms 슬립 간격으로도 지연 추가
 3. Blocking과 Poller 모드는 메시지가 도착할 때 즉시 스레드를 깨우는 효율적인 커널 메커니즘(`recv()` 시스템 콜 및 `zmq_poll()`)을 사용
 
 **메시지 크기 영향**: Sleep 오버헤드는 작은 메시지(64B)에서 가장 두드러지며 NonBlocking이 1.73배 느리고, 큰 메시지(65KB)의 경우 1.86배 느립니다.
 
-**권장사항**: NonBlocking 모드는 성능이 좋지 않아(25-86% 느림) 프로덕션 사용에 권장되지 않습니다. 대부분의 시나리오에 Poller(가장 간단한 API와 최고의 전반적인 성능) 또는 단일 소켓 애플리케이션에 Blocking을 사용하세요.
+**권장사항**: NonBlocking 모드는 상대적으로 느리므로(25-86% 느림) 굳이 사용할 필요가 없습니다. 대부분의 시나리오에 Poller(가장 간단한 API와 최고의 전반적인 성능) 또는 단일 소켓 애플리케이션에 Blocking을 사용하세요.
 
 ### 수신 모드 선택 고려사항
 
@@ -181,7 +182,7 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 - 두 모드 모두 최적의 CPU 효율성(유휴 시 0%)과 낮은 지연 제공
 
 **NonBlocking 모드 제한사항**:
-- 성능이 좋지 않아(Blocking/Poller보다 1.2-2.4배 느림) **프로덕션에 권장되지 않음**
+- 상대적으로 성능이 떨어지므로(Blocking/Poller보다 1.2-2.4배 느림) **굳이 사용할 필요 없음**
 - Thread.Sleep(1ms)가 지연 오버헤드 추가
 - Blocking 또는 Poller를 사용할 수 없는 기존 폴링 루프와 통합해야 하는 경우에만 NonBlocking 고려
 
@@ -273,7 +274,8 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 
 **메시지 크기 기반 권장사항**:
 - **작은 메시지 (≤512B)**: **`ArrayPool<byte>.Shared`** 사용 - 가장 빠른 성능(ByteArray보다 1-5% 빠름)과 99.8-99.99% 적은 할당
-- **큰 메시지 (≥64KB)**: **`Message`** 또는 **`MessageZeroCopy`** 사용 - 12-16% 빠르고 99.95% 적은 할당
+- **큰 메시지 (≥512B)**: **`Message`** 사용 - 12-16% 빠르고 99.95% 적은 할당
+- **MessageZeroCopy**: 이미 할당된 언매니지드 메모리를 제로카피로 전달해야 하는 특수한 경우에만 사용
 - **전환 영역 (1KB)**: ArrayPool과 Message 모두 유사하게 수행; 코드 단순성 vs GC 요구사항에 따라 선택
 
 **ArrayPool 사용 패턴**:
@@ -294,7 +296,7 @@ finally
 }
 ```
 
-**MessageZeroCopy 사용 패턴**:
+**MessageZeroCopy 사용 패턴** (특수한 경우):
 ```csharp
 using Net.Zmq;
 using System.Runtime.InteropServices;
@@ -317,9 +319,9 @@ socket.Send(message);
 ```
 
 **GC 민감도**:
-- GC 일시 중지에 민감한 애플리케이션은 ArrayPool(작은 메시지) 또는 MessageZeroCopy(큰 메시지)를 선호해야 함
+- GC 일시 중지에 민감한 애플리케이션은 ArrayPool(작은 메시지) 또는 Message(큰 메시지)를 선호해야 함
 - 드문 메시징이나 작은 메시지가 있는 애플리케이션은 ByteArray가 허용 가능할 수 있음
-- 고처리량 애플리케이션은 GC 프리 전략(ArrayPool, Message, MessageZeroCopy)의 이점
+- 고처리량 애플리케이션은 GC 프리 전략(ArrayPool, Message)의 이점
 
 **코드 복잡성**:
 - **ByteArray**: 자동 메모리 관리로 가장 간단한 구현
@@ -329,8 +331,8 @@ socket.Send(message);
 
 **성능 트레이드오프**:
 - **작은 메시지 (≤ 512B)**: 관리 전략(ByteArray, ArrayPool)이 더 낮은 오버헤드 보유
-- **큰 메시지 (> 512B)**: MessageZeroCopy가 제로카피 시맨틱을 통해 최적의 성능 제공
-- **일관성**: GC 프리 전략(ArrayPool, MessageZeroCopy)이 더 예측 가능한 타이밍 제공
+- **큰 메시지 (≥ 512B)**: Message가 최적의 성능 제공
+- **일관성**: GC 프리 전략(ArrayPool, Message)이 더 예측 가능한 타이밍 제공
 
 ## 벤치마크 실행
 
@@ -369,7 +371,7 @@ dotnet run -c Release --filter "*MessageSize=64*"
 - 실제 프로덕션 성능은 네트워크 특성, 메시지 패턴 및 시스템 부하에 따라 다름
 - GC 측정은 벤치마크 워크로드를 반영; 애플리케이션 GC 동작은 전체 힙 활동에 따라 다름
 - 지연 측정에는 10K 메시지에 대한 송신 및 수신 작업 모두 포함
-- NonBlocking 모드는 10ms 슬립 간격 사용; 다른 슬립 값은 다른 결과를 생성
+- NonBlocking 모드는 1ms 슬립 간격 사용; 다른 슬립 값은 다른 결과를 생성
 
 ### 결과 해석
 

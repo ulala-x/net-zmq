@@ -75,11 +75,11 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 
 #### NonBlocking Mode - Polling Pattern (Busy-waiting)
 
-**API**: `socket.TryRecv()`
+**API**: `socket.Recv(..., RecvFlags.DontWait)`
 
 **Internal Mechanism**:
 1. Repeated loop in user space
-2. `TryRecv()` checks for messages (internally returns `EAGAIN`/`EWOULDBLOCK` if none available)
+2. `Recv(RecvFlags.DontWait)` checks for messages (internally returns `EAGAIN`/`EWOULDBLOCK` if none available)
 3. Returns immediately with `false` if no message
 4. User code calls `Thread.Sleep(1ms)` before retry
 5. Loop continues without kernel assistance
@@ -87,7 +87,7 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 **Characteristics**:
 - **No kernel-level waiting** - all polling happens in user space
 - `Thread.Sleep(1ms)` reduces CPU usage but adds latency overhead (1.3-1.7x slower)
-- **Not recommended for production** due to poor performance
+- **Relatively lower performance, so there's no need to use it**
 
 #### Why Blocking and Poller Are Efficient
 
@@ -169,7 +169,7 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 
 **Message Size Impact**: The Sleep overhead is most pronounced with small messages (64B) where NonBlocking is 1.73x slower, while for large messages (65KB) it's 1.86x slower.
 
-**Recommendation**: NonBlocking mode is not recommended for production use due to poor performance (25-86% slower). Use Poller for most scenarios (simplest API with best overall performance) or Blocking for single-socket applications.
+**Recommendation**: NonBlocking mode has relatively lower performance (25-86% slower), so there's no need to use it. Use Poller for most scenarios (simplest API with best overall performance) or Blocking for single-socket applications.
 
 ### Receive Mode Selection Considerations
 
@@ -181,7 +181,7 @@ When choosing a receive mode, consider:
 - Both modes provide optimal CPU efficiency (0% when idle) and low latency
 
 **NonBlocking Mode Limitations**:
-- **Not recommended for production** due to poor performance (1.2-2.4x slower than Blocking/Poller)
+- **Relatively lower performance** (1.2-2.4x slower than Blocking/Poller), so **no need to use it**
 - Thread.Sleep(1ms) adds latency overhead
 - Only consider NonBlocking if you must integrate with an existing polling loop where you cannot use Blocking or Poller
 
@@ -273,8 +273,8 @@ When choosing a memory strategy, consider:
 
 **Message Size Based Recommendations**:
 - **Small messages (≤512B)**: Use **`ArrayPool<byte>.Shared`** - fastest performance (1-5% faster than ByteArray) with 99.8-99.99% less allocation
-- **Large messages (≥64KB)**: Use **`Message`** or **`MessageZeroCopy`** - 12-16% faster with 99.95% less allocation
-- **Transition zone (1KB)**: Both ArrayPool and Message perform similarly; choose based on code simplicity vs GC requirements
+- **Large messages (≥512B)**: Use **`Message`** - 12-16% faster with 99.95% less allocation
+- **MessageZeroCopy**: Use only for special cases where you need to transfer already-allocated unmanaged memory with zero-copy
 
 **ArrayPool Usage Pattern**:
 ```csharp
@@ -294,7 +294,7 @@ finally
 }
 ```
 
-**MessageZeroCopy Usage Pattern**:
+**MessageZeroCopy Usage Pattern** (Special Cases):
 ```csharp
 using Net.Zmq;
 using System.Runtime.InteropServices;
@@ -317,9 +317,9 @@ socket.Send(message);
 ```
 
 **GC Sensitivity**:
-- Applications sensitive to GC pauses should prefer ArrayPool (small messages) or MessageZeroCopy (large messages)
+- Applications sensitive to GC pauses should prefer ArrayPool (small messages) or Message (large messages)
 - Applications with infrequent messaging or small messages may find ByteArray acceptable
-- High-throughput applications benefit from GC-free strategies (ArrayPool, Message, MessageZeroCopy)
+- High-throughput applications benefit from GC-free strategies (ArrayPool, Message)
 
 **Code Complexity**:
 - **ByteArray**: Simplest implementation with automatic memory management
@@ -329,8 +329,8 @@ socket.Send(message);
 
 **Performance Trade-offs**:
 - **Small messages (≤ 512B)**: Managed strategies (ByteArray, ArrayPool) have lower overhead
-- **Large messages (> 512B)**: MessageZeroCopy delivers optimal performance through zero-copy semantics
-- **Consistency**: GC-free strategies (ArrayPool, MessageZeroCopy) provide more predictable timing
+- **Large messages (≥ 512B)**: Message delivers optimal performance
+- **Consistency**: GC-free strategies (ArrayPool, Message) provide more predictable timing
 
 ## Running Benchmarks
 
@@ -369,7 +369,7 @@ dotnet run -c Release --filter "*MessageSize=64*"
 - Actual production performance depends on network characteristics, message patterns, and system load
 - GC measurements reflect benchmark workload; application GC behavior depends on overall heap activity
 - Latency measurements include both send and receive operations for 10K messages
-- NonBlocking mode uses 10ms sleep interval; different sleep values would yield different results
+- NonBlocking mode uses 1ms sleep interval; different sleep values would yield different results
 
 ### Interpreting Results
 

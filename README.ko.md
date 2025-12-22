@@ -208,15 +208,9 @@ Net.Zmq는 고성능 메시징을 위한 여러 전략을 제공합니다. 사�
    }
    ```
 
-2. **큰 메시지 (>512B)** - 제로카피를 위해 MessageZeroCopy 사용:
+2. **큰 메시지 (≥512B)** - Message 사용:
    ```csharp
-   nint nativePtr = Marshal.AllocHGlobal(dataSize);
-   unsafe
-   {
-       var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
-       sourceData.CopyTo(nativeSpan);
-   }
-   using var msg = new Message(nativePtr, dataSize, ptr => Marshal.FreeHGlobal(ptr));
+   using var msg = new Message(data);
    socket.Send(msg);
    ```
 
@@ -236,27 +230,39 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 ### 벤치마크 결과 요약
 
-| 메시지 크기 | 최적 전송 전략 | 처리량 | 최적 수신 모드 | 처리량 |
-|------------|--------------|--------|--------------|--------|
-| **64 bytes** | ArrayPool | 4,120 K/sec | Blocking | 4,570 K/sec |
-| **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 2,120 K/sec |
-| **1 KB** | ArrayPool | 1,110 K/sec | Blocking | 1,330 K/sec |
-| **64 KB** | Message | 83.9 K/sec | Blocking | 71.5 K/sec |
+#### Receive Modes (64-byte messages)
+
+| Mode | Mean | Messages/sec | Data Throughput | Ratio |
+|------|------|--------------|-----------------|-------|
+| **Blocking** | 2.187 ms | 4.57M | 2.34 Gbps | 1.00x |
+| **Poller** | 2.311 ms | 4.33M | 2.22 Gbps | 1.06x |
+| NonBlocking | 3.783 ms | 2.64M | 1.35 Gbps | 1.73x |
+
+#### Memory Strategies (64-byte messages)
+
+| Strategy | Mean | Messages/sec | Allocated | Ratio |
+|----------|------|--------------|-----------|-------|
+| **ArrayPool** | 2.428 ms | 4.12M | 1.85 KB | 0.99x |
+| **Message** | 4.279 ms | 2.34M | 168.54 KB | 1.76x |
+| ByteArray | 2.438 ms | 4.10M | 9,860 KB | 1.00x |
+
+#### Memory Strategies (65KB messages)
+
+| Strategy | Mean | Messages/sec | Allocated | Ratio |
+|----------|------|--------------|-----------|-------|
+| **Message** | 119.164 ms | 83.93K | 171.47 KB | 0.84x |
+| ArrayPool | 142.814 ms | 70.02K | 4.78 KB | 1.01x |
+| ByteArray | 141.652 ms | 70.60K | 4,001 MB | 1.00x |
 
 **핵심 인사이트:**
 
-- **전송 전략:**
-  - 작은 메시지 (≤512B): ArrayPool이 가장 빠름 (1-5% 빠름), 할당 99.98-99.99% 감소
-  - 큰 메시지 (≥64KB): Message가 가장 빠름 (16% 빠름), 할당 99.95% 감소
-
-- **수신 모드:**
-  - Blocking과 Poller 모드는 거의 동일한 성능 (0-6% 차이)
-  - 일관된 API와 다중 소켓 지원을 위해 Poller 사용 권장
-  - NonBlocking 모드는 25-86% 느림 (프로덕션 환경에서 사용 지양)
+- **Memory Strategy:** 작은 메시지는 ArrayPool, 큰 메시지는 Message 권장
+- **Receive Mode:** Blocking과 Poller는 거의 동일 (0-6% 차이), NonBlocking은 상대적으로 느림
+- **MessageZeroCopy:** 이미 할당된 unmanaged memory를 zero-copy로 전달해야 하는 특수한 경우에만 사용
 
 **테스트 환경**: Intel Core Ultra 7 265K (20코어), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [benchmarks/Net.Zmq.Benchmarks/README.ko.md](benchmarks/Net.Zmq.Benchmarks/README.ko.md)를 참조하세요.
+자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [docs/benchmarks.ko.md](docs/benchmarks.ko.md)를 참조하세요.
 
 ## 지원 플랫폼
 

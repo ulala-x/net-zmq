@@ -208,15 +208,9 @@ Net.Zmq offers multiple strategies for high-performance messaging. Choose the ri
    }
    ```
 
-2. **Large Messages (>512B)** - Use MessageZeroCopy for zero-copy:
+2. **Large Messages (≥512B)** - Use Message:
    ```csharp
-   nint nativePtr = Marshal.AllocHGlobal(dataSize);
-   unsafe
-   {
-       var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
-       sourceData.CopyTo(nativeSpan);
-   }
-   using var msg = new Message(nativePtr, dataSize, ptr => Marshal.FreeHGlobal(ptr));
+   using var msg = new Message(data);
    socket.Send(msg);
    ```
 
@@ -236,27 +230,39 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 ### Benchmark Results Summary
 
-| Message Size | Best Send Strategy | Throughput | Best Receive Mode | Throughput |
-|--------------|-------------------|------------|-------------------|------------|
-| **64 bytes** | ArrayPool | 4,120 K/sec | Blocking | 4,570 K/sec |
-| **512 bytes** | ArrayPool | 1,570 K/sec | Poller | 2,120 K/sec |
-| **1 KB** | ArrayPool | 1,110 K/sec | Blocking | 1,330 K/sec |
-| **64 KB** | Message | 83.9 K/sec | Blocking | 71.5 K/sec |
+#### Receive Modes (64-byte messages)
+
+| Mode | Mean | Messages/sec | Data Throughput | Ratio |
+|------|------|--------------|-----------------|-------|
+| **Blocking** | 2.187 ms | 4.57M | 2.34 Gbps | 1.00x |
+| **Poller** | 2.311 ms | 4.33M | 2.22 Gbps | 1.06x |
+| NonBlocking | 3.783 ms | 2.64M | 1.35 Gbps | 1.73x |
+
+#### Memory Strategies (64-byte messages)
+
+| Strategy | Mean | Messages/sec | Allocated | Ratio |
+|----------|------|--------------|-----------|-------|
+| **ArrayPool** | 2.428 ms | 4.12M | 1.85 KB | 0.99x |
+| **Message** | 4.279 ms | 2.34M | 168.54 KB | 1.76x |
+| ByteArray | 2.438 ms | 4.10M | 9,860 KB | 1.00x |
+
+#### Memory Strategies (65KB messages)
+
+| Strategy | Mean | Messages/sec | Allocated | Ratio |
+|----------|------|--------------|-----------|-------|
+| **Message** | 119.164 ms | 83.93K | 171.47 KB | 0.84x |
+| ArrayPool | 142.814 ms | 70.02K | 4.78 KB | 1.01x |
+| ByteArray | 141.652 ms | 70.60K | 4,001 MB | 1.00x |
 
 **Key Insights:**
 
-- **Send Strategies:**
-  - Small messages (≤512B): ArrayPool is fastest (1-5% faster) with 99.98-99.99% less allocation
-  - Large messages (≥64KB): Message is fastest (16% faster) with 99.95% less allocation
-
-- **Receive Modes:**
-  - Blocking and Poller modes perform nearly identically (0-6% difference)
-  - Use Poller for consistent API and multi-socket support
-  - NonBlocking mode is 25-86% slower (avoid in production)
+- **Memory Strategy:** ArrayPool for small messages, Message for large messages
+- **Receive Mode:** Blocking and Poller are nearly identical (0-6% difference), NonBlocking is relatively slower
+- **MessageZeroCopy:** Use only for special cases where you need to transfer already-allocated unmanaged memory with zero-copy
 
 **Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
-For detailed benchmark results, usage examples, and decision flowcharts, see [benchmarks/Net.Zmq.Benchmarks/README.md](benchmarks/Net.Zmq.Benchmarks/README.md).
+For detailed benchmark results, usage examples, and decision flowcharts, see [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Supported Platforms
 
