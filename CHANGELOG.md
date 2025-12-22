@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-12-22
+
+### Changed
+- **Send() now returns bool** - indicates success/failure for non-blocking sends
+- **Poller refactored to instance-based design** - zero-allocation polling
+- **MemoryStrategyBenchmarks changed to pure blocking mode** for accurate measurement
+
+### Added
+- **TryRecv() methods** - non-blocking receive with explicit success indicator
+- **PureBlocking mode** in ReceiveModeBenchmarks for accurate comparison
+- **128KB and 256KB message size tests** in benchmarks
+- **Korean translations** for all documentation, samples, and templates
+- **DocFX documentation** with GitHub Pages deployment
+- **LOH (Large Object Heap) impact analysis** in benchmark documentation
+- **One-Size-Fits-All recommendation section** - Message recommended for consistent performance
+
+### Removed
+- **RecvBytes() and TryRecvBytes()** - caused double-copy and GC pressure; use `Recv(Span<byte>)` or `Recv(Message)` instead
+- **MessagePool** - simplified memory strategies based on benchmark findings
+
+### Documentation
+- Updated benchmark results with new receive modes and memory strategies
+- Added memory strategy selection guide based on message size
+- Key findings documented:
+  - Single socket: PureBlocking recommended
+  - Multiple sockets: Poller recommended
+  - Memory: Message recommended (GC-free, consistent performance)
+  - MessageZeroCopy beneficial at 256KB+
+
 ## [0.1.0] - 2025-12-14
 
 ### Added

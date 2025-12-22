@@ -9,6 +9,35 @@
 
 ## [출시 예정]
 
+## [0.2.0] - 2025-12-22
+
+### 변경됨 (Changed)
+- **Send()가 bool 반환** - 논블로킹 전송의 성공/실패 표시
+- **Poller를 인스턴스 기반 설계로 리팩토링** - 제로 할당 폴링
+- **MemoryStrategyBenchmarks를 순수 블로킹 모드로 변경** - 정확한 측정을 위해
+
+### 추가됨 (Added)
+- **TryRecv() 메서드** - 명시적 성공 표시자를 가진 논블로킹 수신
+- **PureBlocking 모드** - 정확한 비교를 위한 ReceiveModeBenchmarks에 추가
+- **128KB 및 256KB 메시지 크기 테스트** - 벤치마크에 추가
+- **한국어 번역** - 모든 문서, 샘플, 템플릿
+- **DocFX 문서** - GitHub Pages 배포
+- **LOH (Large Object Heap) 영향 분석** - 벤치마크 문서에 추가
+- **단일 전략 권장 섹션** - 일관된 성능을 위해 Message 권장
+
+### 제거됨 (Removed)
+- **RecvBytes() 및 TryRecvBytes()** - 이중 복사와 GC 압력 유발; `Recv(Span<byte>)` 또는 `Recv(Message)` 사용 권장
+- **MessagePool** - 벤치마크 결과에 따라 메모리 전략 단순화
+
+### 문서
+- 새로운 수신 모드 및 메모리 전략으로 벤치마크 결과 업데이트
+- 메시지 크기별 메모리 전략 선택 가이드 추가
+- 주요 발견사항 문서화:
+  - 단일 소켓: PureBlocking 권장
+  - 다중 소켓: Poller 권장
+  - 메모리: Message 권장 (GC 프리, 일관된 성능)
+  - MessageZeroCopy는 256KB 이상에서 유리
+
 ## [0.1.0] - 2025-12-14
 
 ### 추가됨 (Added)
