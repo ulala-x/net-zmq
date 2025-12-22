@@ -90,10 +90,12 @@ class Program
         Console.WriteLine($"Sent {frames.Count} binary frames");
 
         // Receive frames
+        Span<byte> buffer = stackalloc byte[64];
         for (int i = 0; i < frames.Count; i++)
         {
-            var frame = receiver.RecvBytes();
-            Console.WriteLine($"Frame {i + 1}: [{string.Join(", ", frame.Select(b => $"0x{b:X2}"))}]");
+            int size = receiver.Recv(buffer);
+            var frame = buffer[..size];
+            Console.WriteLine($"Frame {i + 1}: [{string.Join(", ", frame.ToArray().Select(b => $"0x{b:X2}"))}]");
         }
 
         Console.WriteLine();
@@ -131,13 +133,20 @@ class Program
 
         // Receive and display
         var cmd = receiver.RecvString();
-        var delimiter = receiver.RecvBytes();
-        var binary = receiver.RecvBytes();
+
+        Span<byte> delimiterBuffer = stackalloc byte[64];
+        int delimiterSize = receiver.Recv(delimiterBuffer);
+        var delimiter = delimiterBuffer[..delimiterSize];
+
+        Span<byte> binaryBuffer = stackalloc byte[64];
+        int binarySize = receiver.Recv(binaryBuffer);
+        var binary = binaryBuffer[..binarySize];
+
         var payload = receiver.RecvString();
 
         Console.WriteLine($"Command: {cmd}");
         Console.WriteLine($"Delimiter: {(delimiter.Length == 0 ? "empty" : "not empty")}");
-        Console.WriteLine($"Binary: [{string.Join(", ", binary.Select(b => $"0x{b:X2}"))}]");
+        Console.WriteLine($"Binary: [{string.Join(", ", binary.ToArray().Select(b => $"0x{b:X2}"))}]");
         Console.WriteLine($"Payload: {payload}");
         Console.WriteLine();
     }

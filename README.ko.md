@@ -75,22 +75,24 @@ using var peerA = new Socket(ctx, SocketType.Router);
 using var peerB = new Socket(ctx, SocketType.Router);
 
 // Router-to-Router를 위한 명시적 식별자 설정
-peerA.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_A"));
-peerB.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_B"));
+peerA.SetOption(SocketOption.Routing_Id, "PEER_A"u8.ToArray());
+peerB.SetOption(SocketOption.Routing_Id, "PEER_B"u8.ToArray());
 
 peerA.Bind("tcp://127.0.0.1:5555");
 peerB.Connect("tcp://127.0.0.1:5555");
 
 // Peer B가 Peer A로 전송 (첫 번째 프레임 = 대상 식별자)
-peerB.Send(Encoding.UTF8.GetBytes("PEER_A"), SendFlags.SendMore);
+peerB.Send("PEER_A"u8, SendFlags.SendMore);
 peerB.Send("Hello from Peer B!");
 
 // Peer A가 수신 (첫 번째 프레임 = 발신자 식별자)
-var senderId = Encoding.UTF8.GetString(peerA.RecvBytes());
+Span<byte> idBuffer = stackalloc byte[64];
+int idLen = peerA.Recv(idBuffer);
+var senderId = idBuffer[..idLen];
 var message = peerA.RecvString();
 
 // Peer A가 발신자의 식별자를 사용하여 응답
-peerA.Send(Encoding.UTF8.GetBytes(senderId), SendFlags.SendMore);
+peerA.Send(senderId, SendFlags.SendMore);
 peerA.Send("Hello back from Peer A!");
 ```
 
@@ -121,11 +123,11 @@ using Net.Zmq;
 
 // 메시지 생성 및 전송
 using var msg = new Message("Hello World");
-socket.Send(ref msg, SendFlags.None);
+socket.Send(msg);
 
 // 메시지 수신
 using var reply = new Message();
-socket.Recv(ref reply, RecvFlags.None);
+socket.Recv(reply);
 Console.WriteLine(reply.ToString());
 ```
 
@@ -172,14 +174,15 @@ socket.Disconnect("tcp://localhost:5555");
 // 전송
 socket.Send("Hello");
 socket.Send(byteArray);
-socket.Send(ref message, SendFlags.SendMore);
+socket.Send(message, SendFlags.SendMore);
 bool sent = socket.Send(data, SendFlags.DontWait); // 블록되면 false 반환
 
 // 수신
 string str = socket.RecvString();
-byte[] data = socket.Recv(buffer);
-socket.Recv(ref message);
+int bytesRead = socket.Recv(buffer);
+socket.Recv(message);
 bool received = socket.TryRecvString(out string result);
+bool gotData = socket.TryRecv(buffer, out int size);
 
 // 옵션
 socket.SetOption(SocketOption.Linger, 0);
@@ -223,7 +226,7 @@ int idx = poller.Add(socket, PollEvents.In);
 using var msg = new Message();
 if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 {
-    socket.Recv(ref msg, RecvFlags.None);
+    socket.Recv(msg);
     // msg.Data 처리
 }
 ```
@@ -232,33 +235,35 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 #### Receive Modes (64-byte messages)
 
-| Mode | Mean | Messages/sec | Data Throughput | Ratio |
-|------|------|--------------|-----------------|-------|
-| **Blocking** | 2.187 ms | 4.57M | 2.34 Gbps | 1.00x |
-| **Poller** | 2.311 ms | 4.33M | 2.22 Gbps | 1.06x |
-| NonBlocking | 3.783 ms | 2.64M | 1.35 Gbps | 1.73x |
+| Mode | Mean | Messages/sec | Ratio |
+|------|------|--------------|-------|
+| **PureBlocking** | 2.372 ms | 4.22M | 1.00x |
+| **BlockingWithBatch** | 2.336 ms | 4.28M | 0.98x |
+| **Poller** | 2.260 ms | 4.42M | 0.95x |
+| NonBlocking | 3.383 ms | 2.96M | 1.43x |
 
 #### Memory Strategies (64-byte messages)
 
 | Strategy | Mean | Messages/sec | Allocated | Ratio |
 |----------|------|--------------|-----------|-------|
-| **ArrayPool** | 2.428 ms | 4.12M | 1.85 KB | 0.99x |
-| **Message** | 4.279 ms | 2.34M | 168.54 KB | 1.76x |
-| ByteArray | 2.438 ms | 4.10M | 9,860 KB | 1.00x |
+| **ByteArray** | 2.382 ms | 4.20M | 1,719 KB | 1.00x |
+| **ArrayPool** | 2.410 ms | 4.15M | 1.08 KB | 1.01x |
+| Message | 4.275 ms | 2.34M | 625 KB | 1.79x |
 
-#### Memory Strategies (65KB messages)
+#### Memory Strategies (65KB+ messages)
 
-| Strategy | Mean | Messages/sec | Allocated | Ratio |
-|----------|------|--------------|-----------|-------|
-| **Message** | 119.164 ms | 83.93K | 171.47 KB | 0.84x |
-| ArrayPool | 142.814 ms | 70.02K | 4.78 KB | 1.01x |
-| ByteArray | 141.652 ms | 70.60K | 4,001 MB | 1.00x |
+| Strategy | 65KB | 128KB | 256KB |
+|----------|------|-------|-------|
+| **Message** | 0.79x ⭐ | 0.16x ⭐ | 0.15x ⭐ |
+| ArrayPool | 0.98x | 0.20x | 0.17x |
+| ByteArray | 1.00x | 1.00x | 1.00x |
 
 **핵심 인사이트:**
 
-- **Memory Strategy:** 작은 메시지는 ArrayPool, 큰 메시지는 Message 권장
-- **Receive Mode:** Blocking과 Poller는 거의 동일 (0-6% 차이), NonBlocking은 상대적으로 느림
-- **MessageZeroCopy:** 이미 할당된 unmanaged memory를 zero-copy로 전달해야 하는 특수한 경우에만 사용
+- **Receive Mode:** 단일 소켓 → PureBlocking, 다중 소켓 → Poller
+- **Memory Strategy:** ≤512B는 ArrayPool, ≥65KB는 Message 권장
+- **One-Size-Fits-All:** 모든 크기에서 일관된 성능을 원하면 `Message` 사용
+- **MessageZeroCopy:** 256KB 이상에서만 유리
 
 **테스트 환경**: Intel Core Ultra 7 265K (20코어), .NET 8.0.22, Ubuntu 24.04.3 LTS
 

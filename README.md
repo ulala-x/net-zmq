@@ -75,22 +75,24 @@ using var peerA = new Socket(ctx, SocketType.Router);
 using var peerB = new Socket(ctx, SocketType.Router);
 
 // Set explicit identities for Router-to-Router
-peerA.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_A"));
-peerB.SetOption(SocketOption.Routing_Id, Encoding.UTF8.GetBytes("PEER_B"));
+peerA.SetOption(SocketOption.Routing_Id, "PEER_A"u8.ToArray());
+peerB.SetOption(SocketOption.Routing_Id, "PEER_B"u8.ToArray());
 
 peerA.Bind("tcp://127.0.0.1:5555");
 peerB.Connect("tcp://127.0.0.1:5555");
 
 // Peer B sends to Peer A (first frame = target identity)
-peerB.Send(Encoding.UTF8.GetBytes("PEER_A"), SendFlags.SendMore);
+peerB.Send("PEER_A"u8, SendFlags.SendMore);
 peerB.Send("Hello from Peer B!");
 
 // Peer A receives (first frame = sender identity)
-var senderId = Encoding.UTF8.GetString(peerA.RecvBytes());
+Span<byte> idBuffer = stackalloc byte[64];
+int idLen = peerA.Recv(idBuffer);
+var senderId = idBuffer[..idLen];
 var message = peerA.RecvString();
 
 // Peer A replies using sender's identity
-peerA.Send(Encoding.UTF8.GetBytes(senderId), SendFlags.SendMore);
+peerA.Send(senderId, SendFlags.SendMore);
 peerA.Send("Hello back from Peer A!");
 ```
 
@@ -121,11 +123,11 @@ using Net.Zmq;
 
 // Create and send message
 using var msg = new Message("Hello World");
-socket.Send(ref msg, SendFlags.None);
+socket.Send(msg);
 
 // Receive message
 using var reply = new Message();
-socket.Recv(ref reply, RecvFlags.None);
+socket.Recv(reply);
 Console.WriteLine(reply.ToString());
 ```
 
@@ -172,14 +174,15 @@ socket.Disconnect("tcp://localhost:5555");
 // Send
 socket.Send("Hello");
 socket.Send(byteArray);
-socket.Send(ref message, SendFlags.SendMore);
+socket.Send(message, SendFlags.SendMore);
 bool sent = socket.Send(data, SendFlags.DontWait); // false if would block
 
 // Receive
 string str = socket.RecvString();
-byte[] data = socket.Recv(buffer);
-socket.Recv(ref message);
+int bytesRead = socket.Recv(buffer);
+socket.Recv(message);
 bool received = socket.TryRecvString(out string result);
+bool gotData = socket.TryRecv(buffer, out int size);
 
 // Options
 socket.SetOption(SocketOption.Linger, 0);
@@ -223,7 +226,7 @@ int idx = poller.Add(socket, PollEvents.In);
 using var msg = new Message();
 if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 {
-    socket.Recv(ref msg, RecvFlags.None);
+    socket.Recv(msg);
     // Process msg.Data
 }
 ```
@@ -232,33 +235,35 @@ if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
 
 #### Receive Modes (64-byte messages)
 
-| Mode | Mean | Messages/sec | Data Throughput | Ratio |
-|------|------|--------------|-----------------|-------|
-| **Blocking** | 2.187 ms | 4.57M | 2.34 Gbps | 1.00x |
-| **Poller** | 2.311 ms | 4.33M | 2.22 Gbps | 1.06x |
-| NonBlocking | 3.783 ms | 2.64M | 1.35 Gbps | 1.73x |
+| Mode | Mean | Messages/sec | Ratio |
+|------|------|--------------|-------|
+| **PureBlocking** | 2.372 ms | 4.22M | 1.00x |
+| **BlockingWithBatch** | 2.336 ms | 4.28M | 0.98x |
+| **Poller** | 2.260 ms | 4.42M | 0.95x |
+| NonBlocking | 3.383 ms | 2.96M | 1.43x |
 
 #### Memory Strategies (64-byte messages)
 
 | Strategy | Mean | Messages/sec | Allocated | Ratio |
 |----------|------|--------------|-----------|-------|
-| **ArrayPool** | 2.428 ms | 4.12M | 1.85 KB | 0.99x |
-| **Message** | 4.279 ms | 2.34M | 168.54 KB | 1.76x |
-| ByteArray | 2.438 ms | 4.10M | 9,860 KB | 1.00x |
+| **ByteArray** | 2.382 ms | 4.20M | 1,719 KB | 1.00x |
+| **ArrayPool** | 2.410 ms | 4.15M | 1.08 KB | 1.01x |
+| Message | 4.275 ms | 2.34M | 625 KB | 1.79x |
 
-#### Memory Strategies (65KB messages)
+#### Memory Strategies (65KB+ messages)
 
-| Strategy | Mean | Messages/sec | Allocated | Ratio |
-|----------|------|--------------|-----------|-------|
-| **Message** | 119.164 ms | 83.93K | 171.47 KB | 0.84x |
-| ArrayPool | 142.814 ms | 70.02K | 4.78 KB | 1.01x |
-| ByteArray | 141.652 ms | 70.60K | 4,001 MB | 1.00x |
+| Strategy | 65KB | 128KB | 256KB |
+|----------|------|-------|-------|
+| **Message** | 0.79x ⭐ | 0.16x ⭐ | 0.15x ⭐ |
+| ArrayPool | 0.98x | 0.20x | 0.17x |
+| ByteArray | 1.00x | 1.00x | 1.00x |
 
 **Key Insights:**
 
-- **Memory Strategy:** ArrayPool for small messages, Message for large messages
-- **Receive Mode:** Blocking and Poller are nearly identical (0-6% difference), NonBlocking is relatively slower
-- **MessageZeroCopy:** Use only for special cases where you need to transfer already-allocated unmanaged memory with zero-copy
+- **Receive Mode:** Single socket → PureBlocking, Multiple sockets → Poller
+- **Memory Strategy:** ArrayPool for ≤512B, Message for ≥65KB
+- **One-Size-Fits-All:** Use `Message` for consistent performance across all sizes
+- **MessageZeroCopy:** Beneficial only at 256KB+
 
 **Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
 
