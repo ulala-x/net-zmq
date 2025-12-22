@@ -318,6 +318,9 @@ jobs:
       with:
         name: build-output
 
+    - name: Restore
+      run: dotnet restore
+
     - name: Pack
       run: dotnet pack --configuration Release --no-build --output ./artifacts
 
