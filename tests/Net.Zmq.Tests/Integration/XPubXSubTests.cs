@@ -101,7 +101,7 @@ public class XPub_XSub_Socket
             Thread.Sleep(200);
 
             // Drain subscription message
-            xpub.RecvBytes(RecvFlags.DontWait);
+            xpub.TryRecvBytes(out _);
 
             // When: XPUB sends a message
             xpub.Send("Hello from XPub");

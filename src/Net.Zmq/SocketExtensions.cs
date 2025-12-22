@@ -189,8 +189,7 @@ public static class SocketExtensions
         message = null;
 
         // Try to receive the first frame without blocking
-        var firstFrame = socket.RecvBytes(RecvFlags.DontWait);
-        if (firstFrame == null)
+        if (!socket.TryRecvBytes(out var firstFrame))
         {
             return false;
         }

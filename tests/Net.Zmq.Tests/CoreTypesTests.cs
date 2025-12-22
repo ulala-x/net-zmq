@@ -173,14 +173,13 @@ public class CoreTypesTests
 
         Thread.Sleep(100); // Allow connection to establish
 
-        // Try receive on empty socket should return null
-        Assert.Null(pull.RecvString(RecvFlags.DontWait));
+        // Try receive on empty socket should return false
+        Assert.False(pull.TryRecvString(out _));
 
         // Send and receive
-        Assert.NotEqual(-1, push.Send("Test", SendFlags.DontWait));
+        Assert.True(push.Send("Test", SendFlags.DontWait));
         Thread.Sleep(50); // Allow message to propagate
-        var text = pull.RecvString(RecvFlags.DontWait);
-        Assert.NotNull(text);
+        Assert.True(pull.TryRecvString(out var text));
         Assert.Equal("Test", text);
     }
 

@@ -173,13 +173,13 @@ socket.Disconnect("tcp://localhost:5555");
 socket.Send("Hello");
 socket.Send(byteArray);
 socket.Send(ref message, SendFlags.SendMore);
-int result = socket.Send(data, SendFlags.DontWait); // 블록되면 -1 반환
+bool sent = socket.Send(data, SendFlags.DontWait); // 블록되면 false 반환
 
 // 수신
 string str = socket.RecvString();
 byte[] data = socket.Recv(buffer);
 socket.Recv(ref message);
-bool received = socket.TryRecvString(out string? result);
+bool received = socket.TryRecvString(out string result);
 
 // 옵션
 socket.SetOption(SocketOption.Linger, 0);

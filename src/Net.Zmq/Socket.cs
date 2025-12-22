@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Runtime.InteropServices;
 using System.Text;
 using Net.Zmq.Core.Native;
 using Net.Zmq.Core.SafeHandles;
@@ -13,8 +12,6 @@ public sealed class Socket : IDisposable
 {
     private readonly ZmqSocketHandle _handle;
     private bool _disposed;
-    private nint _recvBufferPtr = nint.Zero;
-    private const int MaxRecvBufferSize = 4 * 1024 * 1024;  // 4 MB
 
     /// <summary>
     /// Creates a new ZMQ socket with the specified type.
@@ -29,7 +26,6 @@ public sealed class Socket : IDisposable
         var ptr = LibZmq.Socket(context.Handle, (int)socketType);
         ZmqException.ThrowIfNull(ptr);
         _handle = new ZmqSocketHandle(ptr, true);
-        _recvBufferPtr = Marshal.AllocHGlobal(MaxRecvBufferSize);
     }
 
     internal nint Handle
@@ -114,9 +110,9 @@ public sealed class Socket : IDisposable
     /// </summary>
     /// <param name="data">The data to send.</param>
     /// <param name="flags">Send flags.</param>
-    /// <returns>The number of bytes sent.</returns>
+    /// <returns>true if sent successfully, false if DontWait flag was set and socket would block (EAGAIN).</returns>
     /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
-    public int Send(byte[] data, SendFlags flags = SendFlags.None)
+    public bool Send(byte[] data, SendFlags flags = SendFlags.None)
     {
         ArgumentNullException.ThrowIfNull(data);
         return Send(data.AsSpan(), flags);
@@ -126,15 +122,13 @@ public sealed class Socket : IDisposable
     /// Sends a span of bytes on the socket.
     /// </summary>
     /// <param name="data">The data to send.</param>
-    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
-    /// <returns>
-    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
-    /// </returns>
+    /// <param name="flags">Send flags.</param>
+    /// <returns>true if sent successfully, false if DontWait flag was set and socket would block (EAGAIN).</returns>
     /// <exception cref="ZmqException">
     /// Thrown if the operation fails with an error other than EAGAIN.
     /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
     /// </exception>
-    public int Send(ReadOnlySpan<byte> data, SendFlags flags = SendFlags.None)
+    public bool Send(ReadOnlySpan<byte> data, SendFlags flags = SendFlags.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         unsafe
@@ -147,12 +141,12 @@ public sealed class Socket : IDisposable
                     var errno = LibZmq.Errno();
                     // Only suppress EAGAIN if DontWait flag is set
                     if (errno == ZmqConstants.EAGAIN && (flags & SendFlags.DontWait) != 0)
-                        return -1;
+                        return false;
 
                     // For all other errors, or EAGAIN without DontWait, throw
                     ZmqException.ThrowIfError(-1);
                 }
-                return result;
+                return true;
             }
         }
     }
@@ -163,16 +157,14 @@ public sealed class Socket : IDisposable
     /// </summary>
     /// <param name="data">Pointer to the native memory buffer containing the data to send.</param>
     /// <param name="size">Size of the data in bytes.</param>
-    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
-    /// <returns>
-    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
-    /// </returns>
+    /// <param name="flags">Send flags.</param>
+    /// <returns>true if sent successfully, false if DontWait flag was set and socket would block (EAGAIN).</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if size is negative.</exception>
     /// <exception cref="ZmqException">
     /// Thrown if the operation fails with an error other than EAGAIN.
     /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
     /// </exception>
-    public int Send(nint data, int size, SendFlags flags = SendFlags.None)
+    public bool Send(nint data, int size, SendFlags flags = SendFlags.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentOutOfRangeException.ThrowIfNegative(size);
@@ -183,27 +175,25 @@ public sealed class Socket : IDisposable
             var errno = LibZmq.Errno();
             // Only suppress EAGAIN if DontWait flag is set
             if (errno == ZmqConstants.EAGAIN && (flags & SendFlags.DontWait) != 0)
-                return -1;
+                return false;
 
             // For all other errors, or EAGAIN without DontWait, throw
             ZmqException.ThrowIfError(-1);
         }
-        return result;
+        return true;
     }
 
     /// <summary>
     /// Sends a UTF-8 string on the socket.
     /// </summary>
     /// <param name="text">The text to send.</param>
-    /// <param name="flags">Send flags. If DontWait flag is set and socket would block (EAGAIN), returns -1 instead of throwing.</param>
-    /// <returns>
-    /// The number of bytes sent, or -1 if DontWait flag was set and socket would block (EAGAIN).
-    /// </returns>
+    /// <param name="flags">Send flags.</param>
+    /// <returns>true if sent successfully, false if DontWait flag was set and socket would block (EAGAIN).</returns>
     /// <exception cref="ZmqException">
     /// Thrown if the operation fails with an error other than EAGAIN.
     /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
     /// </exception>
-    public int Send(string text, SendFlags flags = SendFlags.None)
+    public bool Send(string text, SendFlags flags = SendFlags.None)
     {
         ArgumentNullException.ThrowIfNull(text);
 
@@ -334,28 +324,15 @@ public sealed class Socket : IDisposable
     }
 
     /// <summary>
-    /// Receives a UTF-8 string.
+    /// Receives a UTF-8 string (blocking).
     /// </summary>
-    /// <param name="flags">Receive flags. If DontWait flag is set and no message is available (EAGAIN), returns null instead of throwing.</param>
-    /// <returns>
-    /// The received string, or null if DontWait flag was set and no message is available (EAGAIN).
-    /// </returns>
-    /// <exception cref="ZmqException">
-    /// Thrown if the operation fails with an error other than EAGAIN.
-    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
-    /// </exception>
-    public string? RecvString(RecvFlags flags = RecvFlags.None)
+    /// <returns>The received string.</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
+    public string RecvString()
     {
         using var msg = new Message();
-        try
-        {
-            msg.Recv(Handle, flags);
-            return msg.ToString();
-        }
-        catch (ZmqException ex) when (ex.ErrorNumber == ZmqConstants.EAGAIN && (flags & RecvFlags.DontWait) != 0)
-        {
-            return null;
-        }
+        msg.Recv(Handle, RecvFlags.None);
+        return msg.ToString();
     }
 
     /// <summary>
@@ -386,23 +363,91 @@ public sealed class Socket : IDisposable
     }
 
     /// <summary>
-    /// Receives data as a byte array.
+    /// Receives data as a byte array (blocking).
     /// </summary>
-    /// <param name="flags">Receive flags. If DontWait flag is set and no message is available (EAGAIN), returns null instead of throwing.</param>
-    /// <returns>
-    /// The received data as a byte array, or null if DontWait flag was set and no message is available (EAGAIN).
-    /// </returns>
-    /// <exception cref="ZmqException">
-    /// Thrown if the operation fails with an error other than EAGAIN.
-    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
-    /// </exception>
-    public byte[]? RecvBytes(RecvFlags flags = RecvFlags.None)
+    /// <returns>The received data as a byte array.</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
+    public byte[] RecvBytes()
     {
         using var msg = new Message();
-        var result = Recv(msg, flags);
-        if (result == -1)
-            return null;
+        msg.Recv(Handle, RecvFlags.None);
         return msg.ToArray();
+    }
+
+    /// <summary>
+    /// Tries to receive data as a byte array (non-blocking).
+    /// </summary>
+    /// <param name="data">The received data, or null if no message is available.</param>
+    /// <returns>true if a message was received, false if no message is available (EAGAIN).</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
+    public bool TryRecvBytes(out byte[] data)
+    {
+        using var msg = new Message();
+        var result = Recv(msg, RecvFlags.DontWait);
+        if (result == -1)
+        {
+            data = null!;
+            return false;
+        }
+        data = msg.ToArray();
+        return true;
+    }
+
+    /// <summary>
+    /// Tries to receive a UTF-8 string (non-blocking).
+    /// </summary>
+    /// <param name="text">The received string, or null if no message is available.</param>
+    /// <returns>true if a message was received, false if no message is available (EAGAIN).</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
+    public bool TryRecvString(out string text)
+    {
+        using var msg = new Message();
+        var result = Recv(msg, RecvFlags.DontWait);
+        if (result == -1)
+        {
+            text = null!;
+            return false;
+        }
+        text = msg.ToString();
+        return true;
+    }
+
+    /// <summary>
+    /// Tries to receive data into a span (non-blocking).
+    /// </summary>
+    /// <param name="buffer">The buffer to receive data into.</param>
+    /// <param name="bytesReceived">The number of bytes received.</param>
+    /// <returns>true if a message was received, false if no message is available (EAGAIN).</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
+    public bool TryRecv(Span<byte> buffer, out int bytesReceived)
+    {
+        var result = Recv(buffer, RecvFlags.DontWait);
+        if (result == -1)
+        {
+            bytesReceived = 0;
+            return false;
+        }
+        bytesReceived = result;
+        return true;
+    }
+
+    /// <summary>
+    /// Tries to receive a message (non-blocking).
+    /// </summary>
+    /// <param name="message">The message to receive into.</param>
+    /// <param name="bytesReceived">The number of bytes received.</param>
+    /// <returns>true if a message was received, false if no message is available (EAGAIN).</returns>
+    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
+    public bool TryRecv(Message message, out int bytesReceived)
+    {
+        var result = Recv(message, RecvFlags.DontWait);
+        if (result == -1)
+        {
+            bytesReceived = 0;
+            return false;
+        }
+        bytesReceived = result;
+        return true;
     }
 
     #endregion
@@ -726,11 +771,6 @@ public sealed class Socket : IDisposable
         if (!_disposed)
         {
             _handle.Dispose();
-            if (_recvBufferPtr != nint.Zero)
-            {
-                Marshal.FreeHGlobal(_recvBufferPtr);
-                _recvBufferPtr = nint.Zero;
-            }
             _disposed = true;
         }
     }

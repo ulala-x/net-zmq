@@ -164,12 +164,11 @@ class Program
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                try
+                // Try to receive monitor event (two-frame message)
+                // Frame 1: 6 bytes (event type: uint16 LE + value: int32 LE)
+                // Frame 2: endpoint address string
+                if (monitor.TryRecvBytes(out var eventFrame))
                 {
-                    // Receive monitor event (two-frame message)
-                    // Frame 1: 6 bytes (event type: uint16 LE + value: int32 LE)
-                    // Frame 2: endpoint address string
-                    var eventFrame = monitor.RecvBytes();
                     if (!monitor.HasMore)
                     {
                         // Invalid monitor message format
@@ -184,9 +183,9 @@ class Program
                     // Display the event with formatted output
                     PrintMonitorEvent(eventData);
                 }
-                catch (ZmqException ex) when (ex.ErrorNumber == 11) // EAGAIN
+                else
                 {
-                    // Timeout - continue polling
+                    // No message available - continue polling
                     Thread.Sleep(10);
                 }
             }

@@ -146,10 +146,10 @@ socket.Send("Hello World");
 socket.Send("안녕하세요", Encoding.UTF8);
 
 // Non-blocking send
-int bytesSent = socket.Send("Hello", SendFlags.DontWait);
-if (bytesSent != -1)
+bool sent = socket.Send("Hello", SendFlags.DontWait);
+if (sent)
 {
-    Console.WriteLine($"Sent {bytesSent} bytes");
+    Console.WriteLine("Message sent successfully");
 }
 ```
 
@@ -161,7 +161,7 @@ byte[] data = [1, 2, 3, 4, 5];
 socket.Send(data);
 
 // Non-blocking send
-int bytesSent = socket.Send(data, SendFlags.DontWait); // -1 if would block
+bool sent = socket.Send(data, SendFlags.DontWait); // false if would block
 ```
 
 #### Send Multi-part Messages
@@ -197,7 +197,7 @@ string message = socket.RecvString();
 string message = socket.RecvString(Encoding.UTF8);
 
 // Non-blocking receive
-bool received = socket.TryRecvString(out string? result);
+bool received = socket.TryRecvString(out string result);
 if (received)
 {
     Console.WriteLine($"Received: {result}");
@@ -216,8 +216,8 @@ int bytesReceived = socket.Recv(buffer);
 Console.WriteLine($"Received {bytesReceived} bytes");
 
 // Non-blocking receive
-bool received = socket.TryRecvBytes(out byte[]? result);
-if (received && result != null)
+bool received = socket.TryRecvBytes(out byte[] result);
+if (received)
 {
     Console.WriteLine($"Received {result.Length} bytes");
 }
