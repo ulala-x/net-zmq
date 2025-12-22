@@ -133,7 +133,7 @@ NetZeroMQ.Benchmarks/
 
 ### 1. Detailed Benchmark Results
 
-#### 1.1 Send Strategy Comparison (MemoryStrategy, 10,000 messages)
+#### 1.1 Send Strategy Comparison (MessageBufferStrategy, 10,000 messages)
 
 | Message Size | ArrayPool | ByteArray | Message | MessageZeroCopy | Winner |
 |--------------|-----------|-----------|---------|-----------------|--------|

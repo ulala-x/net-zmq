@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace Net.Zmq.Benchmarks.Benchmarks;
 
 /// <summary>
-/// Compares four memory management approaches for ZeroMQ send/recv operations:
+/// Compares four message buffer management approaches for ZeroMQ send/recv operations:
 /// 1. ByteArray (Baseline): Allocate new byte[] for each message (max GC pressure)
 /// 2. ArrayPool: Reuse byte[] from ArrayPool.Shared (min GC pressure)
 /// 3. Message: Use Message objects backed by native memory (copy to native)
@@ -15,14 +15,14 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 /// - Sender creates buffers and sends data
 /// - Receiver processes messages and creates output buffers for external delivery
 ///
-/// This benchmark helps determine the optimal memory strategy based on:
+/// This benchmark helps determine the optimal message buffer strategy based on:
 /// - Performance (throughput/latency)
 /// - GC pressure (Gen0/Gen1/Gen2 collections)
 /// - Memory efficiency (total allocations)
 /// </summary>
 [MemoryDiagnoser]
 [GcServer(true)]
-public class MemoryStrategyBenchmarks
+public class MessageBufferStrategyBenchmarks
 {
     [Params(64, 512, 1024, 65536, 131072, 262144)]
     public int MessageSize { get; set; }

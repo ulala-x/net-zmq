@@ -133,7 +133,7 @@ NetZeroMQ.Benchmarks/
 
 ### 1. 상세 벤치마크 결과
 
-#### 1.1 전송 전략 비교 (MemoryStrategy, 10,000개 메시지)
+#### 1.1 전송 전략 비교 (MessageBufferStrategy, 10,000개 메시지)
 
 | 메시지 크기 | ArrayPool | ByteArray | Message | MessageZeroCopy | 우승자 |
 |-------------|-----------|-----------|---------|-----------------|--------|

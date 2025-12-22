@@ -193,7 +193,7 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ### Recommended Approach
 
-**Memory Strategy: Use `Message`**
+**Message Buffer Strategy: Use `Message`**
 - Consistent performance across all message sizes
 - GC-free (native memory)
 - Up to 6x faster at 128KB+ messages

@@ -2,14 +2,14 @@
 
 # Net.Zmq 성능 벤치마크
 
-이 문서는 수신 모드 비교 및 메모리 전략 평가에 중점을 둔 Net.Zmq의 포괄적인 성능 벤치마크 결과를 포함합니다.
+이 문서는 수신 모드 비교 및 메시지 버퍼 전략 평가에 중점을 둔 Net.Zmq의 포괄적인 성능 벤치마크 결과를 포함합니다.
 
 ## 요약
 
-Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 위해 여러 수신 모드와 메모리 전략을 제공합니다. 이 벤치마크 제품군은 다음을 평가합니다:
+Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 위해 여러 수신 모드와 메시지 버퍼 전략을 제공합니다. 이 벤치마크 제품군은 다음을 평가합니다:
 
 - **수신 모드 (Receive Modes)**: Blocking, NonBlocking, Poller 기반 메시지 수신
-- **메모리 전략 (Memory Strategies)**: ByteArray, ArrayPool, Message, MessageZeroCopy 접근 방식
+- **메시지 버퍼 전략 (Message Buffer Strategies)**: ByteArray, ArrayPool, Message, MessageZeroCopy 접근 방식
 - **메시지 크기 (Message Sizes)**: 64바이트(작음), 512바이트, 1024바이트, 65KB(큼)
 
 ### 테스트 환경
@@ -247,7 +247,7 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 - **다중 소켓**: 항상 **Poller** 사용
 - **피해야 할 것**: NonBlocking 모드 (Sleep 오버헤드로 1.3-1.7배 느림)
 
-## 메모리 전략 벤치마크
+## 메시지 버퍼 전략 벤치마크
 
 ### 각 전략의 작동 방식
 
@@ -259,9 +259,9 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 
 **MessageZeroCopy (`Marshal.AllocHGlobal`)**: 언매니지드 메모리를 직접 할당하고 프리 콜백을 통해 libzmq에 소유권을 전달합니다. 제로카피 시맨틱을 제공하지만 신중한 라이프사이클 관리가 필요합니다.
 
-### 메모리 벤치마크 메트릭 이해
+### 메시지 버퍼 벤치마크 메트릭 이해
 
-[표준 벤치마크 메트릭](#벤치마크-메트릭-이해) 외에도 메모리 전략 벤치마크에는 다음이 포함됩니다:
+[표준 벤치마크 메트릭](#벤치마크-메트릭-이해) 외에도 메시지 버퍼 전략 벤치마크에는 다음이 포함됩니다:
 
 | 열 | 설명 |
 |--------|-------------|
@@ -348,9 +348,9 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 
 **메모리 할당**: ArrayPool은 예외적인 효율성(모든 크기에서 1.08-258 KB 총 할당 - ByteArray 대비 99.3-99.99% 감소)을 보여줍니다. Message와 MessageZeroCopy는 메시지 크기에 관계없이 일관된 ~625 KB 할당 유지(큰 크기에서 ByteArray 대비 99.95-99.99% 감소).
 
-### 메모리 전략 선택 고려사항
+### 메시지 버퍼 전략 선택 고려사항
 
-메모리 전략을 선택할 때 다음을 고려하세요:
+메시지 버퍼 전략을 선택할 때 다음을 고려하세요:
 
 **메시지 크기 기반 권장사항**:
 - **작은 메시지 (≤512B)**: **`ArrayPool<byte>.Shared`** - ByteArray와 동등한 성능, GC 프리
@@ -441,8 +441,8 @@ dotnet run -c Release
 # Run only receive mode benchmarks
 dotnet run -c Release --filter "*ReceiveModeBenchmarks*"
 
-# Run only memory strategy benchmarks
-dotnet run -c Release --filter "*MemoryStrategyBenchmarks*"
+# Run only message buffer strategy benchmarks
+dotnet run -c Release --filter "*MessageBufferStrategyBenchmarks*"
 
 # Run specific message size
 dotnet run -c Release --filter "*MessageSize=64*"
@@ -475,4 +475,4 @@ dotnet run -c Release --filter "*MessageSize=64*"
 
 전체 BenchmarkDotNet 출력은 다음을 참조하세요:
 - `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.ReceiveModeBenchmarks-report-github.md`
-- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.MemoryStrategyBenchmarks-report-github.md`
+- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.MessageBufferStrategyBenchmarks-report-github.md`

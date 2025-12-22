@@ -3,7 +3,7 @@
 # NetZMQ 벤치마크 실행 스크립트
 # 사용법:
 #   ./run-benchmarks.sh           # 전체 벤치마크 실행
-#   ./run-benchmarks.sh memory    # MemoryStrategyBenchmarks만 실행
+#   ./run-benchmarks.sh buffer    # MessageBufferStrategyBenchmarks만 실행
 #   ./run-benchmarks.sh receive   # ReceiveModeBenchmarks만 실행
 
 set -e  # 에러 발생 시 중단
@@ -39,9 +39,9 @@ print_warning() {
 MODE=${1:-all}
 
 case $MODE in
-    memory)
-        print_header "Memory Strategy Benchmarks 실행"
-        FILTER="*MemoryStrategyBenchmarks*"
+    buffer)
+        print_header "Message Buffer Strategy Benchmarks 실행"
+        FILTER="*MessageBufferStrategyBenchmarks*"
         ;;
     receive)
         print_header "Receive Mode Benchmarks 실행"
@@ -52,10 +52,10 @@ case $MODE in
         FILTER=""
         ;;
     *)
-        echo "사용법: $0 [memory|receive|all]"
+        echo "사용법: $0 [buffer|receive|all]"
         echo ""
         echo "옵션:"
-        echo "  memory   - MemoryStrategyBenchmarks만 실행"
+        echo "  buffer   - MessageBufferStrategyBenchmarks만 실행"
         echo "  receive  - ReceiveModeBenchmarks만 실행"
         echo "  all      - 전체 벤치마크 실행 (기본값)"
         exit 1

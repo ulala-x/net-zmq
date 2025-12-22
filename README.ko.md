@@ -193,7 +193,7 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ### 권장 방식
 
-**메모리 전략: `Message` 사용**
+**메시지 버퍼 전략: `Message` 사용**
 - 모든 메시지 크기에서 일관된 성능
 - GC 프리 (네이티브 메모리)
 - 128KB 이상에서 최대 6배 빠름

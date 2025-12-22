@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Send() now returns bool** - indicates success/failure for non-blocking sends
 - **Poller refactored to instance-based design** - zero-allocation polling
-- **MemoryStrategyBenchmarks changed to pure blocking mode** for accurate measurement
+- **MessageBufferStrategyBenchmarks changed to pure blocking mode** for accurate measurement
 
 ### Added
 - **TryRecv() methods** - non-blocking receive with explicit success indicator

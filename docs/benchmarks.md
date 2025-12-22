@@ -9,7 +9,7 @@ This document contains comprehensive performance benchmark results for Net.Zmq, 
 Net.Zmq provides multiple receive modes and memory strategies to accommodate different performance requirements and architectural patterns. This benchmark suite evaluates:
 
 - **Receive Modes**: Blocking, NonBlocking, and Poller-based message reception
-- **Memory Strategies**: ByteArray, ArrayPool, Message, and MessageZeroCopy approaches
+- **Message Buffer Strategies**: ByteArray, ArrayPool, Message, and MessageZeroCopy approaches
 - **Message Sizes**: 64 bytes (small), 512 bytes, 1024 bytes, and 65KB (large)
 
 ### Test Environment
@@ -246,7 +246,7 @@ When choosing a receive mode, consider:
 - **Multiple Sockets**: Always use **Poller**
 - **Avoid**: NonBlocking mode (1.3-1.7x slower with Sleep overhead)
 
-## Memory Strategy Benchmarks
+## Message Buffer Strategy Benchmarks
 
 ### How Each Strategy Works
 
@@ -258,9 +258,9 @@ When choosing a receive mode, consider:
 
 **MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. Provides zero-copy semantics but requires careful lifecycle management.
 
-### Understanding Memory Benchmark Metrics
+### Understanding Message Buffer Benchmark Metrics
 
-In addition to the [standard benchmark metrics](#understanding-benchmark-metrics), memory strategy benchmarks include:
+In addition to the [standard benchmark metrics](#understanding-benchmark-metrics), message buffer strategy benchmarks include:
 
 | Column | Description |
 |--------|-------------|
@@ -347,9 +347,9 @@ All tests use PureBlocking mode for reception.
 
 **Memory Allocation**: ArrayPool demonstrates exceptional efficiency (1.08-258 KB total allocation across all sizes - 99.3-99.99% reduction vs ByteArray). Message and MessageZeroCopy maintain consistent ~625 KB allocation regardless of message size (99.95-99.99% reduction vs ByteArray at large sizes).
 
-### Memory Strategy Selection Considerations
+### Message Buffer Strategy Selection Considerations
 
-When choosing a memory strategy, consider:
+When choosing a message buffer strategy, consider:
 
 **Message Size Based Recommendations**:
 - **Small messages (≤512B)**: Use **`ArrayPool<byte>.Shared`** - equivalent to ByteArray performance, GC-free
@@ -440,8 +440,8 @@ For specific benchmarks:
 # Run only receive mode benchmarks
 dotnet run -c Release --filter "*ReceiveModeBenchmarks*"
 
-# Run only memory strategy benchmarks
-dotnet run -c Release --filter "*MemoryStrategyBenchmarks*"
+# Run only message buffer strategy benchmarks
+dotnet run -c Release --filter "*MessageBufferStrategyBenchmarks*"
 
 # Run specific message size
 dotnet run -c Release --filter "*MessageSize=64*"
@@ -474,4 +474,4 @@ The benchmarks reflect the performance characteristics of different approaches r
 
 For the complete BenchmarkDotNet output, see:
 - `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.ReceiveModeBenchmarks-report-github.md`
-- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.MemoryStrategyBenchmarks-report-github.md`
+- `benchmarks/Net.Zmq.Benchmarks/BenchmarkDotNet.Artifacts/results/Net.Zmq.Benchmarks.Benchmarks.MessageBufferStrategyBenchmarks-report-github.md`
