@@ -191,83 +191,26 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## 성능
 
-Net.Zmq는 고성능 메시징을 위한 여러 전략을 제공합니다. 사용 사례에 따라 적절한 방법을 선택하세요.
+### 권장 방식
 
-### 빠른 시작 가이드
+**메모리 전략: `Message` 사용**
+- 모든 메시지 크기에서 일관된 성능
+- GC 프리 (네이티브 메모리)
+- 128KB 이상에서 최대 6배 빠름
+- .NET Large Object Heap 문제 회피
 
-**메시지 전송:**
-
-1. **작은 메시지 (≤512B)** - 최고의 성능을 위해 ArrayPool 사용:
-   ```csharp
-   var buffer = ArrayPool<byte>.Shared.Rent(size);
-   try
-   {
-       // 버퍼에 데이터 채우기
-       socket.Send(buffer.AsSpan(0, size));
-   }
-   finally
-   {
-       ArrayPool<byte>.Shared.Return(buffer);
-   }
-   ```
-
-2. **큰 메시지 (≥512B)** - Message 사용:
-   ```csharp
-   using var msg = new Message(data);
-   socket.Send(msg);
-   ```
-
-**메시지 수신:**
+**수신 모드:**
+- 단일 소켓 → Blocking
+- 다중 소켓 → `Poller`
 
 ```csharp
-using var poller = new Poller(1);
-int idx = poller.Add(socket, PollEvents.In);
-
+// 권장: Blocking 수신 + Message
 using var msg = new Message();
-if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
-{
-    socket.Recv(msg);
-    // msg.Data 처리
-}
+socket.Recv(msg);
+// msg.Data 처리
 ```
 
-### 벤치마크 결과 요약
-
-#### Receive Modes (64-byte messages)
-
-| Mode | Mean | Messages/sec | Ratio |
-|------|------|--------------|-------|
-| **PureBlocking** | 2.372 ms | 4.22M | 1.00x |
-| **BlockingWithBatch** | 2.336 ms | 4.28M | 0.98x |
-| **Poller** | 2.260 ms | 4.42M | 0.95x |
-| NonBlocking | 3.383 ms | 2.96M | 1.43x |
-
-#### Memory Strategies (64-byte messages)
-
-| Strategy | Mean | Messages/sec | Allocated | Ratio |
-|----------|------|--------------|-----------|-------|
-| **ByteArray** | 2.382 ms | 4.20M | 1,719 KB | 1.00x |
-| **ArrayPool** | 2.410 ms | 4.15M | 1.08 KB | 1.01x |
-| Message | 4.275 ms | 2.34M | 625 KB | 1.79x |
-
-#### Memory Strategies (65KB+ messages)
-
-| Strategy | 65KB | 128KB | 256KB |
-|----------|------|-------|-------|
-| **Message** | 0.79x ⭐ | 0.16x ⭐ | 0.15x ⭐ |
-| ArrayPool | 0.98x | 0.20x | 0.17x |
-| ByteArray | 1.00x | 1.00x | 1.00x |
-
-**핵심 인사이트:**
-
-- **Receive Mode:** 단일 소켓 → PureBlocking, 다중 소켓 → Poller
-- **Memory Strategy:** ≤512B는 ArrayPool, ≥65KB는 Message 권장
-- **One-Size-Fits-All:** 모든 크기에서 일관된 성능을 원하면 `Message` 사용
-- **MessageZeroCopy:** 256KB 이상에서만 유리
-
-**테스트 환경**: Intel Core Ultra 7 265K (20코어), .NET 8.0.22, Ubuntu 24.04.3 LTS
-
-자세한 벤치마크 결과, 사용 예제, 의사결정 플로우차트는 [docs/benchmarks.ko.md](docs/benchmarks.ko.md)를 참조하세요.
+세부 최적화 옵션과 상세 벤치마크는 [docs/benchmarks.ko.md](docs/benchmarks.ko.md)를 참조하세요.
 
 ## 지원 플랫폼
 

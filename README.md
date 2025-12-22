@@ -191,83 +191,26 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## Performance
 
-Net.Zmq offers multiple strategies for high-performance messaging. Choose the right approach based on your use case.
+### Recommended Approach
 
-### Quick Start Guide
+**Memory Strategy: Use `Message`**
+- Consistent performance across all message sizes
+- GC-free (native memory)
+- Up to 6x faster at 128KB+ messages
+- Avoids .NET Large Object Heap issues
 
-**Sending Messages:**
-
-1. **Small Messages (≤512B)** - Use ArrayPool for best performance:
-   ```csharp
-   var buffer = ArrayPool<byte>.Shared.Rent(size);
-   try
-   {
-       // Fill buffer with data
-       socket.Send(buffer.AsSpan(0, size));
-   }
-   finally
-   {
-       ArrayPool<byte>.Shared.Return(buffer);
-   }
-   ```
-
-2. **Large Messages (≥512B)** - Use Message:
-   ```csharp
-   using var msg = new Message(data);
-   socket.Send(msg);
-   ```
-
-**Receiving Messages:**
+**Receive Mode:**
+- Single socket → Blocking
+- Multiple sockets → `Poller`
 
 ```csharp
-using var poller = new Poller(1);
-int idx = poller.Add(socket, PollEvents.In);
-
+// Recommended: Blocking receive with Message
 using var msg = new Message();
-if (poller.Poll(timeout) > 0 && poller.IsReadable(idx))
-{
-    socket.Recv(msg);
-    // Process msg.Data
-}
+socket.Recv(msg);
+// Process msg.Data
 ```
 
-### Benchmark Results Summary
-
-#### Receive Modes (64-byte messages)
-
-| Mode | Mean | Messages/sec | Ratio |
-|------|------|--------------|-------|
-| **PureBlocking** | 2.372 ms | 4.22M | 1.00x |
-| **BlockingWithBatch** | 2.336 ms | 4.28M | 0.98x |
-| **Poller** | 2.260 ms | 4.42M | 0.95x |
-| NonBlocking | 3.383 ms | 2.96M | 1.43x |
-
-#### Memory Strategies (64-byte messages)
-
-| Strategy | Mean | Messages/sec | Allocated | Ratio |
-|----------|------|--------------|-----------|-------|
-| **ByteArray** | 2.382 ms | 4.20M | 1,719 KB | 1.00x |
-| **ArrayPool** | 2.410 ms | 4.15M | 1.08 KB | 1.01x |
-| Message | 4.275 ms | 2.34M | 625 KB | 1.79x |
-
-#### Memory Strategies (65KB+ messages)
-
-| Strategy | 65KB | 128KB | 256KB |
-|----------|------|-------|-------|
-| **Message** | 0.79x ⭐ | 0.16x ⭐ | 0.15x ⭐ |
-| ArrayPool | 0.98x | 0.20x | 0.17x |
-| ByteArray | 1.00x | 1.00x | 1.00x |
-
-**Key Insights:**
-
-- **Receive Mode:** Single socket → PureBlocking, Multiple sockets → Poller
-- **Memory Strategy:** ArrayPool for ≤512B, Message for ≥65KB
-- **One-Size-Fits-All:** Use `Message` for consistent performance across all sizes
-- **MessageZeroCopy:** Beneficial only at 256KB+
-
-**Test Environment**: Intel Core Ultra 7 265K (20 cores), .NET 8.0.22, Ubuntu 24.04.3 LTS
-
-For detailed benchmark results, usage examples, and decision flowcharts, see [docs/benchmarks.md](docs/benchmarks.md).
+For fine-tuning options and detailed benchmarks, see [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Supported Platforms
 
