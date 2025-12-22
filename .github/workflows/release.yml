@@ -9,9 +9,216 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
 
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: |
+          src/*/bin/Release/
+          tests/*/bin/Release/
+          native/
+
+  test-windows:
+    runs-on: windows-2022
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        copy native\runtimes\win-x64\native\libzmq.dll tests\Net.Zmq.Tests\bin\Release\net8.0\
+        copy native\runtimes\win-x64\native\libzmq.dll tests\Net.Zmq.Core.Tests\bin\Release\net8.0\
+      shell: cmd
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-windows-arm64:
+    runs-on: windows-11-arm
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        copy native\runtimes\win-arm64\native\libzmq.dll tests\Net.Zmq.Tests\bin\Release\net8.0\
+        copy native\runtimes\win-arm64\native\libzmq.dll tests\Net.Zmq.Core.Tests\bin\Release\net8.0\
+      shell: cmd
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-linux:
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        cp native/runtimes/linux-x64/native/libzmq.so tests/Net.Zmq.Tests/bin/Release/net8.0/
+        cp native/runtimes/linux-x64/native/libzmq.so tests/Net.Zmq.Core.Tests/bin/Release/net8.0/
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-linux-arm64:
+    runs-on: ubuntu-22.04-arm
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        cp native/runtimes/linux-arm64/native/libzmq.so tests/Net.Zmq.Tests/bin/Release/net8.0/
+        cp native/runtimes/linux-arm64/native/libzmq.so tests/Net.Zmq.Core.Tests/bin/Release/net8.0/
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-macos-arm64:
+    runs-on: macos-15
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        cp native/runtimes/osx-arm64/native/libzmq.dylib tests/Net.Zmq.Tests/bin/Release/net8.0/
+        cp native/runtimes/osx-arm64/native/libzmq.dylib tests/Net.Zmq.Core.Tests/bin/Release/net8.0/
+
+    - name: Test Unit
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  test-macos-x64:
+    runs-on: macos-15
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET x64 (Rosetta)
+      run: |
+        curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 8.0 --architecture x64 --install-dir ~/.dotnet-x64
+        echo "$HOME/.dotnet-x64" >> $GITHUB_PATH
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+
+    - name: Copy native library to test output
+      run: |
+        cp native/runtimes/osx-x64/native/libzmq.dylib tests/Net.Zmq.Tests/bin/Release/net8.0/
+        cp native/runtimes/osx-x64/native/libzmq.dylib tests/Net.Zmq.Core.Tests/bin/Release/net8.0/
+
+    - name: Test Unit
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName!~Integration"
+
+    - name: Test Integration
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Tests/Net.Zmq.Tests.csproj --configuration Release --no-build --verbosity normal --filter "FullyQualifiedName~Integration"
+
+    - name: Test Core
+      run: arch -x86_64 ~/.dotnet-x64/dotnet test tests/Net.Zmq.Core.Tests/Net.Zmq.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  release:
+    runs-on: ubuntu-22.04
+    needs: [test-windows, test-windows-arm64, test-linux, test-linux-arm64, test-macos-arm64, test-macos-x64]
     steps:
     - uses: actions/checkout@v4
 
@@ -24,18 +231,19 @@ jobs:
       id: version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Restore dependencies
-      run: dotnet restore
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
 
-    - name: Build
-      run: dotnet build --configuration Release --no-restore
+    - name: Restore
+      run: dotnet restore
 
     - name: Pack
       run: dotnet pack --configuration Release --no-build --output ./artifacts -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
     - name: Push to NuGet
       run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-      if: github.event_name == 'push'
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
