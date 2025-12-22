@@ -114,7 +114,9 @@ class Program
         var registeredSpokes = new List<string>();
         for (int i = 0; i < 2; i++)
         {
-            var spokeId = Encoding.UTF8.GetString(hub.RecvBytes());
+            using var idMsg = new Message();
+            hub.Recv(idMsg);
+            var spokeId = Encoding.UTF8.GetString(idMsg.Data);
             hub.HasMore.Should(true, "Expected message frame");
             var message = hub.RecvString();
             registeredSpokes.Add(spokeId);
@@ -133,7 +135,9 @@ class Program
         // Spokes receive broadcasts
         foreach (var (spoke, name) in new[] { (spoke1, "SPOKE1"), (spoke2, "SPOKE2") })
         {
-            var from = Encoding.UTF8.GetString(spoke.RecvBytes());
+            using var fromMsg = new Message();
+            spoke.Recv(fromMsg);
+            var from = Encoding.UTF8.GetString(fromMsg.Data);
             spoke.HasMore.Should(true, "Expected message frame");
             var msg = spoke.RecvString();
             Console.WriteLine($"[{name}] received: {msg}");
@@ -167,24 +171,33 @@ class Program
                 // Try to receive monitor event (two-frame message)
                 // Frame 1: 6 bytes (event type: uint16 LE + value: int32 LE)
                 // Frame 2: endpoint address string
-                if (monitor.TryRecvBytes(out var eventFrame))
+                var eventMsg = new Message();
+                if (monitor.TryRecv(eventMsg, out _))
                 {
-                    if (!monitor.HasMore)
+                    try
                     {
-                        // Invalid monitor message format
-                        continue;
+                        if (!monitor.HasMore)
+                        {
+                            // Invalid monitor message format
+                            continue;
+                        }
+
+                        var address = monitor.RecvString();
+
+                        // Parse the event data
+                        var eventData = SocketMonitorEventData.Parse(eventMsg.ToArray(), address);
+
+                        // Display the event with formatted output
+                        PrintMonitorEvent(eventData);
                     }
-
-                    var address = monitor.RecvString();
-
-                    // Parse the event data
-                    var eventData = SocketMonitorEventData.Parse(eventFrame, address);
-
-                    // Display the event with formatted output
-                    PrintMonitorEvent(eventData);
+                    finally
+                    {
+                        eventMsg.Dispose();
+                    }
                 }
                 else
                 {
+                    eventMsg.Dispose();
                     // No message available - continue polling
                     Thread.Sleep(10);
                 }

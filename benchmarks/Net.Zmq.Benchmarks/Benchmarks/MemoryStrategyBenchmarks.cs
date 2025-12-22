@@ -24,7 +24,7 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 [GcServer(true)]
 public class MemoryStrategyBenchmarks
 {
-    [Params(64, 512, 1024, 65536)]
+    [Params(64, 512, 1024, 65536, 131072, 262144)]
     public int MessageSize { get; set; }
 
     [Params(10000)]
@@ -111,34 +111,17 @@ public class MemoryStrategyBenchmarks
         var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            int n = 0;
-
-            while (n < MessageCount)
+            for (int n = 0; n < MessageCount; n++)
             {
-                // First message: blocking wait
+                // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
+                // Receive data frame (blocking)
                 int size = _router2.Recv(_recvBuffer);
 
                 // Simulate external delivery: create new output buffer (GC pressure!)
                 var outputBuffer = new byte[size];
                 _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
                 // External consumer would use outputBuffer here
-
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
-                {
-                    // Receive into fixed buffer
-                    size = _router2.Recv(_recvBuffer);
-
-                    // Simulate external delivery: create new output buffer (GC pressure!)
-                    outputBuffer = new byte[size];
-                    _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
-                    // External consumer would use outputBuffer here
-
-                    n++;
-                }
             }
             countdown.Signal();
         });
@@ -174,12 +157,11 @@ public class MemoryStrategyBenchmarks
         var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            int n = 0;
-
-            while (n < MessageCount)
+            for (int n = 0; n < MessageCount; n++)
             {
-                // First message: blocking wait
+                // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
+                // Receive data frame (blocking)
                 int size = _router2.Recv(_recvBuffer);
 
                 // Simulate external delivery: rent from pool (minimal GC!)
@@ -192,29 +174,6 @@ public class MemoryStrategyBenchmarks
                 finally
                 {
                     ArrayPool<byte>.Shared.Return(outputBuffer);
-                }
-
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
-                {
-                    // Receive into fixed buffer
-                    size = _router2.Recv(_recvBuffer);
-
-                    // Simulate external delivery: rent from pool (minimal GC!)
-                    outputBuffer = ArrayPool<byte>.Shared.Rent(size);
-                    try
-                    {
-                        _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
-                        // External consumer would use outputBuffer[0..size] here
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(outputBuffer);
-                    }
-
-                    n++;
                 }
             }
             countdown.Signal();
@@ -258,32 +217,15 @@ public class MemoryStrategyBenchmarks
         var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            int n = 0;
-
-            while (n < MessageCount)
+            for (int n = 0; n < MessageCount; n++)
             {
-                // First message: blocking wait
+                // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
-                using (var msg = new Message())
-                {
-                    _router2.Recv(msg);
-                    // Use msg.Data directly (no copy to managed memory)
-                    // External consumer would use msg.Data here
-                }
-
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
-                {
-                    // Receive into Message (native memory allocation)
-                    using var msg = new Message();
-                    _router2.Recv(msg);
-                    // Use msg.Data directly (no copy to managed memory)
-                    // External consumer would use msg.Data here
-
-                    n++;
-                }
+                // Receive data frame into Message (blocking)
+                using var msg = new Message();
+                _router2.Recv(msg);
+                // Use msg.Data directly (no copy to managed memory)
+                // External consumer would use msg.Data here
             }
             countdown.Signal();
         });
@@ -318,32 +260,15 @@ public class MemoryStrategyBenchmarks
         var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
         {
-            int n = 0;
-
-            while (n < MessageCount)
+            for (int n = 0; n < MessageCount; n++)
             {
-                // First message: blocking wait
+                // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
-                using (var msg = new Message())
-                {
-                    _router2.Recv(msg);
-                    // Use msg.Data directly (no copy to managed memory)
-                    // External consumer would use msg.Data here
-                }
-
-                n++;
-
-                // Batch receive available messages
-                while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
-                {
-                    // Receive into Message (already zero-copy from ZMQ side)
-                    using var msg = new Message();
-                    _router2.Recv(msg);
-                    // Use msg.Data directly (no copy to managed memory)
-                    // External consumer would use msg.Data here
-
-                    n++;
-                }
+                // Receive data frame into Message (blocking)
+                using var msg = new Message();
+                _router2.Recv(msg);
+                // Use msg.Data directly (no copy to managed memory)
+                // External consumer would use msg.Data here
             }
             countdown.Signal();
         });

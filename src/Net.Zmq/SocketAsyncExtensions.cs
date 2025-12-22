@@ -188,9 +188,17 @@ public static class SocketAsyncExtensions
         ArgumentNullException.ThrowIfNull(socket);
 
         // Fast path: Try non-blocking receive first
-        if (socket.TryRecvBytes(out var data))
+        var msg = new Message();
+        try
         {
-            return data;
+            if (socket.TryRecv(msg, out _))
+            {
+                return msg.ToArray();
+            }
+        }
+        finally
+        {
+            msg.Dispose();
         }
 
         // Slow path: Poll until ready
@@ -206,7 +214,9 @@ public static class SocketAsyncExtensions
                 // Poll with short timeout to check if socket has data available
                 if (poller.Poll(DefaultPollIntervalMs) > 0 && poller.IsReadable(0))
                 {
-                    return socket.RecvBytes();
+                    using var message = new Message();
+                    socket.Recv(message);
+                    return message.ToArray();
                 }
 
                 // Small delay to avoid busy-waiting

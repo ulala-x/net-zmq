@@ -6,18 +6,23 @@ namespace Net.Zmq.Benchmarks.Benchmarks;
 /// <summary>
 /// Compares receive strategies for ROUTER-to-ROUTER multipart messaging:
 ///
-/// 1. Blocking: Thread blocks on Recv() until message available
-///    - Highest throughput (baseline)
-///    - Simplest implementation
+/// 1. PureBlocking: Thread blocks on Recv() for every message
+///    - Simplest implementation (baseline)
+///    - Pure blocking semantics
 ///    - Thread dedicated to single socket
 ///
-/// 2. NonBlocking (Sleep 1ms): TryRecv() with Thread.Sleep(1ms) fallback
+/// 2. BlockingWithBatch: Blocking first, then batch with DontWait
+///    - Hybrid approach: blocking + non-blocking batch
+///    - Reduces syscall overhead
+///    - Higher throughput than pure blocking
+///
+/// 3. NonBlocking (Sleep 1ms): TryRecv() with Thread.Sleep(1ms) fallback
 ///    - No blocking, but Thread.Sleep() adds overhead
 ///    - Slower than Blocking/Poller
 ///    - Not recommended for production
 ///
-/// 3. Poller: Event-driven with zmq_poll()
-///    - Similar to Blocking performance
+/// 4. Poller: Event-driven with zmq_poll()
+///    - Similar to BlockingWithBatch performance
 ///    - Multi-socket support
 ///    - Recommended for production use
 /// </summary>
@@ -86,12 +91,45 @@ public class ReceiveModeBenchmarks
     }
 
     /// <summary>
-    /// Blocking receive mode - highest performance, simplest implementation.
-    /// Uses blocking Recv() for first message, then batch-processes available messages
-    /// with TryRecv() to minimize syscall overhead.
+    /// Pure blocking receive mode - simplest implementation.
+    /// Each message is received with blocking Recv() calls.
+    /// Baseline for comparing other receive strategies.
     /// </summary>
     [Benchmark(Baseline = true)]
-    public void Blocking_RouterToRouter()
+    public void PureBlocking_RouterToRouter()
+    {
+        var countdown = new CountdownEvent(1);
+        var recvThread = new Thread(() =>
+        {
+            for (int n = 0; n < MessageCount; n++)
+            {
+                _router2.Recv(_identityBuffer);  // blocking
+                _router2.Recv(_recvBuffer);      // blocking
+            }
+            countdown.Signal();
+        });
+        recvThread.Start();
+
+        // Sender
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+            _router1.Send(_sendData, SendFlags.DontWait);
+        }
+
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
+    }
+
+    /// <summary>
+    /// Blocking with batch receive mode - hybrid approach for higher performance.
+    /// Uses blocking Recv() for first message, then batch-processes available messages
+    /// with DontWait to minimize syscall overhead.
+    /// </summary>
+    [Benchmark]
+    public void BlockingWithBatch_RouterToRouter()
     {
         var countdown = new CountdownEvent(1);
         var recvThread = new Thread(() =>

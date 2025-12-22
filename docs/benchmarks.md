@@ -37,57 +37,89 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 
 ### How Each Mode Works
 
-#### Blocking Mode - I/O Blocking Pattern
+The benchmark compares four different receive strategies:
 
-**API**: `socket.Recv()`
+#### 1. PureBlocking: Pure Blocking Recv() Pattern
 
-**Internal Mechanism**:
-1. Calls `recv()` syscall, transitioning from user space to kernel space
-2. Thread enters sleep state in kernel's wait queue
-3. When data arrives → network hardware triggers interrupt
-4. Kernel moves thread to ready queue
-5. Scheduler wakes thread and execution resumes
+**Implementation**:
+```csharp
+for (int n = 0; n < MessageCount; n++)
+{
+    socket.Recv(buffer);  // Blocking wait for each message
+}
+```
 
 **Characteristics**:
+- Every message requires a blocking `recv()` syscall
 - Simplest implementation with deterministic waiting
 - **CPU usage: 0% while waiting** (thread is asleep in kernel)
-- Kernel efficiently wakes thread exactly when needed
 - One thread per socket required
 
-#### Poller Mode - Reactor Pattern (I/O Multiplexing)
+#### 2. BlockingWithBatch: Blocking + Batch Hybrid Pattern
 
-**API**: `zmq_poll()`
+**Implementation**:
+```csharp
+while (n < MessageCount)
+{
+    // First message: blocking wait
+    socket.Recv(buffer);
+    n++;
 
-**Internal Mechanism**:
-1. Calls `zmq_poll(sockets, timeout)` which internally uses OS multiplexing APIs:
-   - Linux: `epoll_wait()`
-   - BSD/macOS: `kqueue()`
-   - Windows: `select()` or IOCP
-2. Kernel monitors multiple sockets simultaneously
-3. Any socket event → kernel immediately returns control
-4. Indicates which sockets have events ready
+    // Batch receive available messages
+    while (n < MessageCount && socket.Recv(buffer, RecvFlags.DontWait) != -1)
+    {
+        n++;
+    }
+}
+```
 
 **Characteristics**:
-- Event-driven architecture monitoring multiple sockets with single thread
+- Blocks for the first message, then drains all available messages
+- Reduces syscall overhead by batching when multiple messages are queued
+- **CPU usage: 0% while waiting** for the first message
+- Optimal for high-throughput scenarios with bursty traffic
+
+#### 3. NonBlocking: DontWait + Sleep(1ms) + Batch Pattern
+
+**Implementation**:
+```csharp
+while (n < MessageCount)
+{
+    while (n < MessageCount && socket.Recv(buffer, RecvFlags.DontWait) != -1)
+    {
+        n++;
+    }
+    Thread.Sleep(1);  // Sleep 1ms to reduce CPU usage
+}
+```
+
+**Characteristics**:
+- **No kernel-level blocking** - all polling happens in user space
+- `Thread.Sleep(1ms)` reduces CPU usage but adds latency overhead
+- Batches messages when available, but Sleep() adds 1ms minimum latency
+- **Relatively lower performance** (1.3-1.7x slower than blocking)
+
+#### 4. Poller: Poll(-1) + Batch Pattern (I/O Multiplexing)
+
+**Implementation**:
+```csharp
+while (n < MessageCount)
+{
+    poller.Poll(-1);  // Blocking wait for any socket event
+
+    // Batch receive all available messages
+    while (n < MessageCount && socket.Recv(buffer, RecvFlags.DontWait) != -1)
+    {
+        n++;
+    }
+}
+```
+
+**Characteristics**:
+- Uses OS multiplexing APIs (epoll/kqueue/IOCP) to wait for socket events
 - **CPU usage: 0% while waiting** (kernel-level blocking)
-- Kernel uses hardware interrupts to detect events efficiently
-- Slightly more memory overhead for polling infrastructure
-
-#### NonBlocking Mode - Polling Pattern (Busy-waiting)
-
-**API**: `socket.Recv(..., RecvFlags.DontWait)`
-
-**Internal Mechanism**:
-1. Repeated loop in user space
-2. `Recv(RecvFlags.DontWait)` checks for messages (internally returns `EAGAIN`/`EWOULDBLOCK` if none available)
-3. Returns immediately with `false` if no message
-4. User code calls `Thread.Sleep(1ms)` before retry
-5. Loop continues without kernel assistance
-
-**Characteristics**:
-- **No kernel-level waiting** - all polling happens in user space
-- `Thread.Sleep(1ms)` reduces CPU usage but adds latency overhead (1.3-1.7x slower)
-- **Relatively lower performance, so there's no need to use it**
+- Batches all available messages after wake-up
+- Ideal for monitoring multiple sockets with a single thread
 
 #### Why Blocking and Poller Are Efficient
 
@@ -176,19 +208,43 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 When choosing a receive mode, consider:
 
 **Recommended Approaches**:
-- **Single Socket**: Use **Blocking** mode for simplicity and best performance
+- **Single Socket**: Use **PureBlocking** mode for simplicity and deterministic behavior
+  - Simplest implementation with minimal code complexity
+  - Predictable behavior: one syscall per message
+  - Ideal for scenarios where message arrival is unpredictable or sparse
+
 - **Multiple Sockets**: Use **Poller** mode to monitor multiple sockets with a single thread
-- Both modes provide optimal CPU efficiency (0% when idle) and low latency
+  - Event-driven architecture scales to many sockets
+  - Kernel efficiently wakes thread when any socket has data
+  - Batches available messages for throughput efficiency
 
-**NonBlocking Mode Limitations**:
-- **Relatively lower performance** (1.2-2.4x slower than Blocking/Poller), so **no need to use it**
-- Thread.Sleep(1ms) adds latency overhead
-- Only consider NonBlocking if you must integrate with an existing polling loop where you cannot use Blocking or Poller
+**Performance Characteristics by Strategy**:
 
-**Performance Characteristics**:
-- Blocking and Poller deliver similar performance (within 5% for most cases)
-- Both use kernel-level waiting that wakes threads immediately when messages arrive
-- NonBlocking uses user-space polling which is inherently less efficient
+1. **PureBlocking**: Best for single-socket, low-to-medium throughput scenarios
+   - One blocking syscall per message
+   - No batching overhead or complexity
+   - Predictable, deterministic latency
+
+2. **BlockingWithBatch**: Best for high-throughput, bursty traffic scenarios
+   - Combines blocking wait with opportunistic batching
+   - Reduces syscall overhead when messages arrive in bursts
+   - Optimal when sender produces messages faster than receiver can process
+
+3. **NonBlocking**: **Not recommended** - relatively lower performance
+   - 1.3-1.7x slower than blocking strategies
+   - Thread.Sleep(1ms) adds minimum latency per batch
+   - Only use if you must integrate with an existing polling loop
+
+4. **Poller**: Best for multi-socket scenarios
+   - Single thread can efficiently monitor multiple sockets
+   - Kernel-level event notification with zero idle CPU usage
+   - Batches messages after wake-up for throughput efficiency
+
+**General Recommendations**:
+- **Single Socket + Predictable Traffic**: Use **PureBlocking**
+- **Single Socket + Bursty Traffic**: Use **BlockingWithBatch** (if implemented)
+- **Multiple Sockets**: Always use **Poller**
+- **Avoid**: NonBlocking mode (1.3-1.7x slower with Sleep overhead)
 
 ## Memory Strategy Benchmarks
 
@@ -215,66 +271,103 @@ In addition to the [standard benchmark metrics](#understanding-benchmark-metrics
 
 ### Performance Results
 
-All tests use Poller mode for reception.
+All tests use PureBlocking mode for reception.
 
 #### 64-Byte Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ArrayPool** | 2.428 ms | 242.8 ns | 4.12M | 2.11 Gbps | - | 1.85 KB | 0.99x |
-| **Message** | 4.279 ms | 427.9 ns | 2.34M | 1.20 Gbps | - | 168.54 KB | 1.76x |
-| **MessageZeroCopy** | 5.917 ms | 591.7 ns | 1.69M | 0.87 Gbps | - | 168.61 KB | 2.43x |
-| **ByteArray** | 2.438 ms | 243.8 ns | 4.10M | 2.10 Gbps | 9.77 | 9860.2 KB | 1.00x |
+| **ByteArray** | 2.382 ms | 238.17 ns | 4.20M | 2.15 Gbps | 3.91 | 1719.08 KB | 1.00x |
+| **ArrayPool** | 2.410 ms | 240.96 ns | 4.15M | 2.13 Gbps | - | 1.08 KB | 1.01x |
+| **Message** | 4.275 ms | 427.47 ns | 2.34M | 1.20 Gbps | - | 625.34 KB | 1.79x |
+| **MessageZeroCopy** | 5.897 ms | 589.71 ns | 1.70M | 0.87 Gbps | - | 625.34 KB | 2.48x |
 
 #### 512-Byte Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ArrayPool** | 6.376 ms | 637.6 ns | 1.57M | 6.43 Gbps | - | 2.04 KB | 0.95x |
-| **Message** | 8.187 ms | 818.7 ns | 1.22M | 5.01 Gbps | - | 168.72 KB | 1.22x |
-| **ByteArray** | 6.707 ms | 670.7 ns | 1.49M | 6.11 Gbps | 48.83 | 50017.99 KB | 1.00x |
-| **MessageZeroCopy** | 13.372 ms | 1.34 μs | 748K | 3.07 Gbps | - | 168.80 KB | 1.99x |
+| **ByteArray** | 6.584 ms | 658.41 ns | 1.52M | 6.23 Gbps | 23.44 | 10469.08 KB | 1.00x |
+| **ArrayPool** | 6.214 ms | 621.44 ns | 1.61M | 6.60 Gbps | - | 1.53 KB | 0.94x |
+| **Message** | 7.930 ms | 793.02 ns | 1.26M | 5.16 Gbps | - | 625.34 KB | 1.20x |
+| **MessageZeroCopy** | 12.263 ms | 1.23 μs | 815.46K | 3.34 Gbps | - | 625.34 KB | 1.86x |
 
 #### 1024-Byte Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ArrayPool** | 9.021 ms | 902.1 ns | 1.11M | 9.05 Gbps | - | 2.24 KB | 1.01x |
-| **Message** | 9.739 ms | 973.9 ns | 1.03M | 8.39 Gbps | - | 168.92 KB | 1.09x |
-| **ByteArray** | 8.973 ms | 897.3 ns | 1.11M | 9.10 Gbps | 97.66 | 100033.11 KB | 1.00x |
-| **MessageZeroCopy** | 14.612 ms | 1.46 μs | 684K | 5.60 Gbps | - | 169.01 KB | 1.63x |
+| **ByteArray** | 8.731 ms | 873.14 ns | 1.15M | 9.39 Gbps | 46.88 | 20469.09 KB | 1.00x |
+| **ArrayPool** | 8.267 ms | 826.69 ns | 1.21M | 9.88 Gbps | - | 2.04 KB | 0.95x |
+| **Message** | 9.309 ms | 930.94 ns | 1.07M | 8.75 Gbps | - | 625.34 KB | 1.07x |
+| **MessageZeroCopy** | 13.296 ms | 1.33 μs | 752.13K | 6.15 Gbps | - | 625.34 KB | 1.52x |
 
 #### 65KB Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|------|-----------|-------|
-| **Message** | 119.164 ms | 11.92 μs | 83.93K | 5.13 GB/s | - | - | 171.47 KB | 0.84x |
-| **MessageZeroCopy** | 124.720 ms | 12.47 μs | 80.18K | 4.90 GB/s | - | - | 171.56 KB | 0.88x |
-| **ArrayPool** | 142.814 ms | 14.28 μs | 70.02K | 4.28 GB/s | - | - | 4.78 KB | 1.01x |
-| **ByteArray** | 141.652 ms | 14.17 μs | 70.60K | 4.31 GB/s | 3906.25 | 781.25 | 4001252.47 KB | 1.00x |
+| **ByteArray** | 140.630 ms | 14.06 μs | 71.11K | 4.35 GB/s | 3333.33 | - | 1280469.54 KB | 1.00x |
+| **ArrayPool** | 138.018 ms | 13.80 μs | 72.45K | 4.43 GB/s | - | - | 65.38 KB | 0.98x |
+| **Message** | 111.554 ms | 11.16 μs | 89.64K | 5.48 GB/s | - | - | 625.53 KB | 0.79x |
+| **MessageZeroCopy** | 123.824 ms | 12.38 μs | 80.76K | 4.94 GB/s | - | - | 625.58 KB | 0.88x |
+
+#### 128KB Messages
+
+| Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Gen2 | Allocated | Ratio |
+|----------|------|---------|--------------|-----------------|------|------|------|-----------|-------|
+| **ByteArray** | 1,259 ms | 125.9 μs | 7.94K | 1.02 GB/s | 57000 | 57000 | 57000 | 2.5 GB | 1.00x |
+| **ArrayPool** | 251.62 ms | 25.16 μs | 39.74K | 5.09 GB/s | - | - | - | 129 KB | 0.20x |
+| **Message** | 203.68 ms | 20.37 μs | 49.10K | 6.28 GB/s | - | - | - | 625 KB | 0.16x |
+| **MessageZeroCopy** | 226.45 ms | 22.65 μs | 44.16K | 5.65 GB/s | - | - | - | 625 KB | 0.18x |
+
+#### 256KB Messages
+
+| Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Gen2 | Allocated | Ratio |
+|----------|------|---------|--------------|-----------------|------|------|------|-----------|-------|
+| **ByteArray** | 2,495 ms | 249.5 μs | 4.01K | 1.03 GB/s | 105000 | 105000 | 105000 | 5 GB | 1.00x |
+| **ArrayPool** | 413.04 ms | 41.30 μs | 24.21K | 6.20 GB/s | - | - | - | 258 KB | 0.17x |
+| **Message** | 378.18 ms | 37.82 μs | 26.44K | 6.77 GB/s | - | - | - | 626 KB | 0.15x |
+| **MessageZeroCopy** | 368.16 ms | 36.82 μs | 27.16K | 6.95 GB/s | - | - | - | 626 KB | 0.15x |
 
 ### Performance and GC Analysis
 
-**Small Messages (64B)**: ArrayPool delivers the best performance (2.428 ms, 4.12M msg/sec) with near-zero GC pressure (1.85 KB allocated). ByteArray is comparable in speed (2.438 ms, 4.10M msg/sec) but generates significant GC pressure (9.77 Gen0 collections, 9860.2 KB allocated). Message (4.279 ms, 1.76x slower) and MessageZeroCopy (5.917 ms, 2.43x slower) show substantial overhead due to native interop costs being proportionally high for small payloads.
+**Small Messages (64B)**: ByteArray (2.382 ms, 4.20M msg/sec, 1.00x) and ArrayPool (2.410 ms, 4.15M msg/sec, 1.01x) show nearly identical performance with only a 1% difference. However, ByteArray generates moderate GC pressure (3.91 Gen0 collections, 1719 KB allocated) while ArrayPool maintains near-zero allocation (1.08 KB). Message (4.275 ms, 1.79x slower) and MessageZeroCopy (5.897 ms, 2.48x slower) show substantial overhead due to native interop costs being proportionally high for small payloads.
 
-**Medium Messages (512B)**: ArrayPool remains fastest (6.376 ms, 1.57M msg/sec, 0.95x) with minimal allocation (2.04 KB). ByteArray is slightly slower (6.707 ms, 1.49M msg/sec) but shows increasing GC pressure (48.83 Gen0 collections, 50 MB allocated). Message (8.187 ms, 1.22x) performs reasonably, while MessageZeroCopy (13.372 ms, 1.99x) shows unexpected overhead.
+**Medium Messages (512B)**: ArrayPool becomes the fastest (6.214 ms, 1.61M msg/sec, 0.94x = 6% faster) with minimal allocation (1.53 KB). ByteArray is slightly slower (6.584 ms, 1.52M msg/sec, 1.00x) and shows increasing GC pressure (23.44 Gen0 collections, 10.5 MB allocated). Message (7.930 ms, 1.20x) performs reasonably, while MessageZeroCopy (12.263 ms, 1.86x) shows unexpected overhead.
 
-**Medium-Large Messages (1KB)**: Performance converges between ArrayPool (9.021 ms, 1.11M msg/sec, 1.01x) and ByteArray (8.973 ms, 1.11M msg/sec, 1.00x), with ByteArray now showing substantial GC pressure (97.66 Gen0 collections, 100 MB allocated). Message (9.739 ms, 1.09x) becomes competitive, while MessageZeroCopy (14.612 ms, 1.63x) still lags.
+**Medium-Large Messages (1KB)**: ArrayPool maintains its lead (8.267 ms, 1.21M msg/sec, 0.95x = 5% faster) with minimal allocation (2.04 KB), while ByteArray (8.731 ms, 1.15M msg/sec, 1.00x) shows substantial GC pressure (46.88 Gen0 collections, 20 MB allocated). Message (9.309 ms, 1.07x) becomes more competitive, while MessageZeroCopy (13.296 ms, 1.52x) still lags.
 
-**Large Messages (65KB)**: Native strategies dominate - Message achieves best performance (119.164 ms, 83.93K msg/sec, 0.84x = 16% faster than baseline), followed by MessageZeroCopy (124.720 ms, 80.18K msg/sec, 0.88x = 12% faster). ArrayPool (142.814 ms, 70.02K msg/sec, 1.01x) and ByteArray (141.652 ms, 70.60K msg/sec, 1.00x) are similar in speed but ByteArray triggers massive GC pressure (3906 Gen0 + 781 Gen1 collections, 4 GB allocated).
+**Large Messages (65KB)**: Native strategies dominate - Message achieves best performance (111.554 ms, 89.64K msg/sec, 0.79x = 21% faster than baseline), followed by MessageZeroCopy (123.824 ms, 80.76K msg/sec, 0.88x = 12% faster). ArrayPool (138.018 ms, 72.45K msg/sec, 0.98x = 2% faster) and ByteArray (140.630 ms, 71.11K msg/sec, 1.00x) are similar in speed but ByteArray triggers massive GC pressure (3333 Gen0 collections, 1.25 GB allocated).
 
-**GC Pattern Transition**: ArrayPool and native strategies maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 9.77 Gen0 at 64B → 48.83 Gen0 at 512B → 97.66 Gen0 at 1KB → 3906 Gen0 + 781 Gen1 at 65KB.
+**Very Large Messages (128KB)**: ByteArray suffers extreme GC pressure (57,000 Gen0/1/2 collections each, 2.5 GB allocated) taking 1,259 ms, while Message achieves 203.68 ms - **6.2x faster** (0.16x). ArrayPool is also 5x faster at 251.62 ms but 19% slower than Message.
 
-**Memory Allocation**: ArrayPool demonstrates exceptional efficiency (1.85-4.78 KB total allocation across all sizes - 99.8-99.99% reduction vs ByteArray). Message and MessageZeroCopy maintain consistent ~170 KB allocation regardless of message size (99.95% reduction vs ByteArray at 65KB).
+**Extra Large Messages (256KB)**: ByteArray's GC pressure intensifies (105,000 Gen0/1/2 collections each, 5 GB allocated) taking 2,495 ms. Message (378.18 ms) and MessageZeroCopy (368.16 ms) are **6.6-6.8x faster**. ArrayPool (413.04 ms) is also 6x faster but 9-11% slower than Message-based strategies.
+
+**Large Object Heap (LOH) Impact**: In .NET, objects ≥85KB are allocated on the LOH, causing GC costs to skyrocket. This explains ByteArray's dramatic performance degradation at 128KB/256KB. Message uses native memory, completely avoiding this issue.
+
+**GC Pattern Transition**: ArrayPool and native strategies maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 3.91 Gen0 at 64B → 23.44 Gen0 at 512B → 46.88 Gen0 at 1KB → 3333 Gen0 at 65KB → 57,000 Gen0/1/2 at 128KB → 105,000 Gen0/1/2 at 256KB.
+
+**Memory Allocation**: ArrayPool demonstrates exceptional efficiency (1.08-258 KB total allocation across all sizes - 99.3-99.99% reduction vs ByteArray). Message and MessageZeroCopy maintain consistent ~625 KB allocation regardless of message size (99.95-99.99% reduction vs ByteArray at large sizes).
 
 ### Memory Strategy Selection Considerations
 
 When choosing a memory strategy, consider:
 
 **Message Size Based Recommendations**:
-- **Small messages (≤512B)**: Use **`ArrayPool<byte>.Shared`** - fastest performance (1-5% faster than ByteArray) with 99.8-99.99% less allocation
-- **Large messages (≥512B)**: Use **`Message`** - 12-16% faster with 99.95% less allocation
+- **Small messages (≤512B)**: Use **`ArrayPool<byte>.Shared`** - equivalent to ByteArray performance, GC-free
+- **Large messages (≥65KB)**: Use **`Message`** - 18-19% faster than ArrayPool, GC-free
+- **Very large messages (≥128KB)**: Use **`Message`** or **`MessageZeroCopy`** - 6x+ faster than other strategies
 - **MessageZeroCopy**: Use only for special cases where you need to transfer already-allocated unmanaged memory with zero-copy
+
+**One-Size-Fits-All Recommendation**:
+
+If message sizes vary or are unpredictable, we recommend **`Message`**:
+
+1. **Consistent Performance**: Provides predictable performance across all message sizes
+2. **GC-Free**: Zero GC pressure using native memory
+3. **Large Message Optimization**: 18-19% faster than ArrayPool for ≥65KB messages
+4. **LOH Avoidance**: Completely bypasses .NET LOH issues for 128KB+ messages
+5. **Adequate Small Message Performance**: Even at 64B, processes 2.34M messages/sec
+
+While ArrayPool is slightly faster for small messages (1% at 64B), Message is clearly superior for large messages, making **Message the safer choice** for a single strategy approach.
 
 **ArrayPool Usage Pattern**:
 ```csharp

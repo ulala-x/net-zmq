@@ -189,8 +189,10 @@ public static class SocketExtensions
         message = null;
 
         // Try to receive the first frame without blocking
-        if (!socket.TryRecvBytes(out var firstFrame))
+        var firstMsg = new Message();
+        if (!socket.TryRecv(firstMsg, out _))
         {
+            firstMsg.Dispose();
             return false;
         }
 
@@ -199,7 +201,7 @@ public static class SocketExtensions
         try
         {
             // Add the first frame
-            multipart.Add(firstFrame);
+            multipart.Add(firstMsg);
 
             // Receive remaining frames (they should be available immediately)
             while (socket.HasMore)

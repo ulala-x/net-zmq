@@ -363,37 +363,6 @@ public sealed class Socket : IDisposable
     }
 
     /// <summary>
-    /// Receives data as a byte array (blocking).
-    /// </summary>
-    /// <returns>The received data as a byte array.</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails.</exception>
-    public byte[] RecvBytes()
-    {
-        using var msg = new Message();
-        msg.Recv(Handle, RecvFlags.None);
-        return msg.ToArray();
-    }
-
-    /// <summary>
-    /// Tries to receive data as a byte array (non-blocking).
-    /// </summary>
-    /// <param name="data">The received data, or null if no message is available.</param>
-    /// <returns>true if a message was received, false if no message is available (EAGAIN).</returns>
-    /// <exception cref="ZmqException">Thrown if the operation fails with an error other than EAGAIN.</exception>
-    public bool TryRecvBytes(out byte[] data)
-    {
-        using var msg = new Message();
-        var result = Recv(msg, RecvFlags.DontWait);
-        if (result == -1)
-        {
-            data = null!;
-            return false;
-        }
-        data = msg.ToArray();
-        return true;
-    }
-
-    /// <summary>
     /// Tries to receive a UTF-8 string (non-blocking).
     /// </summary>
     /// <param name="text">The received string, or null if no message is available.</param>
