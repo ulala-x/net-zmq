@@ -8,7 +8,7 @@ This document contains comprehensive performance benchmark results for Net.Zmq, 
 
 Net.Zmq provides multiple receive modes and memory strategies to accommodate different performance requirements and architectural patterns. This benchmark suite evaluates:
 
-- **Receive Modes**: Blocking, NonBlocking, and Poller-based message reception
+- **Receive Modes**: PureBlocking, BlockingWithBatch, NonBlocking, and Poller-based message reception
 - **Message Buffer Strategies**: ByteArray, ArrayPool, Message, and MessageZeroCopy approaches
 - **Message Sizes**: 64 bytes (small), 512 bytes, 1024 bytes, and 65KB (large)
 
@@ -162,46 +162,50 @@ All tests use ROUTER-to-ROUTER pattern with concurrent sender and receiver.
 
 | Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 2.187 ms | 218.7 ns | 4.57M | 2.34 Gbps | 336 B | 1.00x |
-| **Poller** | 2.311 ms | 231.1 ns | 4.33M | 2.22 Gbps | 456 B | 1.06x |
-| NonBlocking (Sleep 1ms) | 3.783 ms | 378.3 ns | 2.64M | 1.35 Gbps | 336 B | 1.73x |
+| **PureBlocking** | 2.418 ms | 241.8 ns | 4.14M | 2.12 Gbps | 340 B | 1.00x |
+| **BlockingWithBatch** | 2.374 ms | 237.4 ns | 4.21M | 2.16 Gbps | 340 B | 0.98x |
+| **Poller** | 2.380 ms | 238.0 ns | 4.20M | 2.15 Gbps | 460 B | 0.98x |
+| NonBlocking (Sleep 1ms) | 3.468 ms | 346.8 ns | 2.88M | 1.48 Gbps | 339 B | 1.43x |
 
 #### 512-Byte Messages
 
 | Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 4.902 ms | 490.2 ns | 2.04M | 8.36 Gbps | 336 B | 1.00x |
-| **Poller** | 4.718 ms | 471.8 ns | 2.12M | 8.68 Gbps | 456 B | 0.96x |
-| NonBlocking (Sleep 1ms) | 6.137 ms | 613.7 ns | 1.63M | 6.67 Gbps | 336 B | 1.25x |
+| **PureBlocking** | 5.289 ms | 528.9 ns | 1.89M | 7.74 Gbps | 344 B | 1.00x |
+| **BlockingWithBatch** | 5.493 ms | 549.3 ns | 1.82M | 7.46 Gbps | 344 B | 1.04x |
+| **Poller** | 5.318 ms | 531.8 ns | 1.88M | 7.70 Gbps | 467 B | 1.01x |
+| NonBlocking (Sleep 1ms) | 6.819 ms | 681.9 ns | 1.47M | 6.01 Gbps | 344 B | 1.29x |
 
 #### 1024-Byte Messages
 
 | Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 7.541 ms | 754.1 ns | 1.33M | 10.82 Gbps | 336 B | 1.00x |
-| **Poller** | 7.737 ms | 773.7 ns | 1.29M | 10.53 Gbps | 456 B | 1.03x |
-| NonBlocking (Sleep 1ms) | 9.661 ms | 966.1 ns | 1.04M | 8.44 Gbps | 336 B | 1.28x |
+| **PureBlocking** | 8.263 ms | 826.3 ns | 1.21M | 9.91 Gbps | 352 B | 1.00x |
+| **BlockingWithBatch** | 8.066 ms | 806.6 ns | 1.24M | 10.16 Gbps | 352 B | 0.98x |
+| **Poller** | 8.367 ms | 836.7 ns | 1.20M | 9.79 Gbps | 472 B | 1.01x |
+| NonBlocking (Sleep 1ms) | 10.220 ms | 1.02 μs | 978.46K | 8.02 Gbps | 352 B | 1.24x |
 
 #### 65KB Messages
 
 | Mode | Mean | Latency | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 139.915 ms | 13.99 μs | 71.47K | 4.37 GB/s | 664 B | 1.00x |
-| **Poller** | 141.733 ms | 14.17 μs | 70.56K | 4.31 GB/s | 640 B | 1.01x |
-| NonBlocking (Sleep 1ms) | 260.014 ms | 26.00 μs | 38.46K | 2.35 GB/s | 1736 B | 1.86x |
+| **PureBlocking** | 148.122 ms | 14.81 μs | 67.51K | 4.12 GB/s | 352 B | 1.00x |
+| **BlockingWithBatch** | 143.933 ms | 14.39 μs | 69.48K | 4.24 GB/s | 688 B | 0.97x |
+| **Poller** | 144.763 ms | 14.48 μs | 69.08K | 4.22 GB/s | 640 B | 0.98x |
+| NonBlocking (Sleep 1ms) | 359.381 ms | 35.94 μs | 27.83K | 1.70 GB/s | 1360 B | 2.43x |
 
 ### Performance Analysis
 
-**Blocking vs Poller**: Performance is nearly identical across all message sizes (96-106% relative performance). For small messages (64B-1KB), Poller is 0-4% faster than Blocking. For large messages (65KB), Blocking is 1% faster than Poller. Both modes use kernel-level waiting mechanisms that efficiently wake threads when messages arrive. Poller allocates slightly more memory (456-640 bytes vs 336-664 bytes for 10K messages) due to polling infrastructure, but the difference is negligible in practice.
+**PureBlocking, BlockingWithBatch, and Poller Comparison**: All three blocking-based modes show nearly identical performance across all message sizes (97-104% relative performance). For small messages (64B), BlockingWithBatch and Poller are about 2% faster than PureBlocking. For medium messages (512B-1KB), all three modes perform nearly equally. For large messages (65KB), BlockingWithBatch is 3% faster. All blocking-based modes use kernel-level waiting mechanisms that efficiently wake threads when messages arrive.
 
-**NonBlocking Performance**: NonBlocking mode with `Thread.Sleep(1ms)` is consistently slower than Blocking and Poller modes (1.25-1.86x slower) due to:
-1. User-space polling with `TryRecv()` has overhead compared to kernel-level blocking
+**NonBlocking Performance**: NonBlocking mode with `Thread.Sleep(1ms)` is consistently slower than blocking-based modes (1.24-2.43x slower) due to:
+1. User-space polling with `Recv(RecvFlags.DontWait)` has overhead compared to kernel-level blocking
 2. Thread.Sleep() adds latency even with minimal 1ms sleep interval
-3. Blocking and Poller modes use efficient kernel mechanisms (`recv()` syscall and `zmq_poll()`) that wake threads immediately when messages arrive
+3. Blocking-based modes use efficient kernel mechanisms (`recv()` syscall and `zmq_poll()`) that wake threads immediately when messages arrive
 
-**Message Size Impact**: The Sleep overhead is most pronounced with small messages (64B) where NonBlocking is 1.73x slower, while for large messages (65KB) it's 1.86x slower.
+**Message Size Impact**: The Sleep overhead is more pronounced with large messages. For small messages (64B), NonBlocking is 1.43x slower, while for large messages (65KB) it's 2.43x slower.
 
-**Recommendation**: NonBlocking mode has relatively lower performance (25-86% slower), so there's no need to use it. Use Poller for most scenarios (simplest API with best overall performance) or Blocking for single-socket applications.
+**Recommendation**: NonBlocking mode has relatively lower performance (24-143% slower), so there's no need to use it. Use Poller for most scenarios (multi-socket support with best overall performance) or PureBlocking/BlockingWithBatch for single-socket applications.
 
 ### Receive Mode Selection Considerations
 

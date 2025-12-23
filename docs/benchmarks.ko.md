@@ -8,7 +8,7 @@
 
 Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 위해 여러 수신 모드와 메시지 버퍼 전략을 제공합니다. 이 벤치마크 제품군은 다음을 평가합니다:
 
-- **수신 모드 (Receive Modes)**: Blocking, NonBlocking, Poller 기반 메시지 수신
+- **수신 모드 (Receive Modes)**: PureBlocking, BlockingWithBatch, NonBlocking, Poller 기반 메시지 수신
 - **메시지 버퍼 전략 (Message Buffer Strategies)**: ByteArray, ArrayPool, Message, MessageZeroCopy 접근 방식
 - **메시지 크기 (Message Sizes)**: 64바이트(작음), 512바이트, 1024바이트, 65KB(큼)
 
@@ -163,46 +163,50 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 
 | 모드 | Mean | 지연 | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 2.187 ms | 218.7 ns | 4.57M | 2.34 Gbps | 336 B | 1.00x |
-| **Poller** | 2.311 ms | 231.1 ns | 4.33M | 2.22 Gbps | 456 B | 1.06x |
-| NonBlocking (Sleep 1ms) | 3.783 ms | 378.3 ns | 2.64M | 1.35 Gbps | 336 B | 1.73x |
+| **PureBlocking** | 2.418 ms | 241.8 ns | 4.14M | 2.12 Gbps | 340 B | 1.00x |
+| **BlockingWithBatch** | 2.374 ms | 237.4 ns | 4.21M | 2.16 Gbps | 340 B | 0.98x |
+| **Poller** | 2.380 ms | 238.0 ns | 4.20M | 2.15 Gbps | 460 B | 0.98x |
+| NonBlocking (Sleep 1ms) | 3.468 ms | 346.8 ns | 2.88M | 1.48 Gbps | 339 B | 1.43x |
 
 #### 512바이트 메시지
 
 | 모드 | Mean | 지연 | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 4.902 ms | 490.2 ns | 2.04M | 8.36 Gbps | 336 B | 1.00x |
-| **Poller** | 4.718 ms | 471.8 ns | 2.12M | 8.68 Gbps | 456 B | 0.96x |
-| NonBlocking (Sleep 1ms) | 6.137 ms | 613.7 ns | 1.63M | 6.67 Gbps | 336 B | 1.25x |
+| **PureBlocking** | 5.289 ms | 528.9 ns | 1.89M | 7.74 Gbps | 344 B | 1.00x |
+| **BlockingWithBatch** | 5.493 ms | 549.3 ns | 1.82M | 7.46 Gbps | 344 B | 1.04x |
+| **Poller** | 5.318 ms | 531.8 ns | 1.88M | 7.70 Gbps | 467 B | 1.01x |
+| NonBlocking (Sleep 1ms) | 6.819 ms | 681.9 ns | 1.47M | 6.01 Gbps | 344 B | 1.29x |
 
 #### 1024바이트 메시지
 
 | 모드 | Mean | 지연 | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 7.541 ms | 754.1 ns | 1.33M | 10.82 Gbps | 336 B | 1.00x |
-| **Poller** | 7.737 ms | 773.7 ns | 1.29M | 10.53 Gbps | 456 B | 1.03x |
-| NonBlocking (Sleep 1ms) | 9.661 ms | 966.1 ns | 1.04M | 8.44 Gbps | 336 B | 1.28x |
+| **PureBlocking** | 8.263 ms | 826.3 ns | 1.21M | 9.91 Gbps | 352 B | 1.00x |
+| **BlockingWithBatch** | 8.066 ms | 806.6 ns | 1.24M | 10.16 Gbps | 352 B | 0.98x |
+| **Poller** | 8.367 ms | 836.7 ns | 1.20M | 9.79 Gbps | 472 B | 1.01x |
+| NonBlocking (Sleep 1ms) | 10.220 ms | 1.02 μs | 978.46K | 8.02 Gbps | 352 B | 1.24x |
 
 #### 65KB 메시지
 
 | 모드 | Mean | 지연 | Messages/sec | Data Throughput | Allocated | Ratio |
 |------|------|---------|--------------|-----------------|-----------|-------|
-| **Blocking** | 139.915 ms | 13.99 μs | 71.47K | 4.37 GB/s | 664 B | 1.00x |
-| **Poller** | 141.733 ms | 14.17 μs | 70.56K | 4.31 GB/s | 640 B | 1.01x |
-| NonBlocking (Sleep 1ms) | 260.014 ms | 26.00 μs | 38.46K | 2.35 GB/s | 1736 B | 1.86x |
+| **PureBlocking** | 148.122 ms | 14.81 μs | 67.51K | 4.12 GB/s | 352 B | 1.00x |
+| **BlockingWithBatch** | 143.933 ms | 14.39 μs | 69.48K | 4.24 GB/s | 688 B | 0.97x |
+| **Poller** | 144.763 ms | 14.48 μs | 69.08K | 4.22 GB/s | 640 B | 0.98x |
+| NonBlocking (Sleep 1ms) | 359.381 ms | 35.94 μs | 27.83K | 1.70 GB/s | 1360 B | 2.43x |
 
 ### 성능 분석
 
-**Blocking vs Poller**: 성능은 모든 메시지 크기에서 거의 동일합니다(96-106% 상대 성능). 작은 메시지(64B-1KB)의 경우 Poller가 Blocking보다 0-4% 빠릅니다. 큰 메시지(65KB)의 경우 Blocking이 Poller보다 1% 빠릅니다. 두 모드 모두 메시지가 도착할 때 스레드를 효율적으로 깨우는 커널 레벨 대기 메커니즘을 사용합니다. Poller는 폴링 인프라로 인해 약간 더 많은 메모리(10K 메시지당 456-640바이트 vs 336-664바이트)를 할당하지만, 실제로는 차이가 무시할 만합니다.
+**PureBlocking, BlockingWithBatch, Poller 비교**: 세 가지 블로킹 기반 모드의 성능은 모든 메시지 크기에서 거의 동일합니다(97-104% 상대 성능). 작은 메시지(64B)에서 BlockingWithBatch와 Poller가 PureBlocking보다 약 2% 빠릅니다. 중간 크기 메시지(512B-1KB)에서는 세 모드가 거의 동등한 성능을 보이며, 큰 메시지(65KB)에서 BlockingWithBatch가 3% 빠릅니다. 모든 블로킹 기반 모드는 메시지가 도착할 때 스레드를 효율적으로 깨우는 커널 레벨 대기 메커니즘을 사용합니다.
 
-**NonBlocking 성능**: `Thread.Sleep(1ms)`를 사용한 NonBlocking 모드는 다음 이유로 Blocking 및 Poller 모드보다 일관되게 느립니다(1.25-1.86배 느림):
+**NonBlocking 성능**: `Thread.Sleep(1ms)`를 사용한 NonBlocking 모드는 다음 이유로 블로킹 기반 모드보다 일관되게 느립니다(1.24-2.43배 느림):
 1. `Recv(RecvFlags.DontWait)`를 사용한 사용자 공간 폴링은 커널 레벨 블로킹에 비해 오버헤드 발생
 2. Thread.Sleep()은 최소 1ms 슬립 간격으로도 지연 추가
-3. Blocking과 Poller 모드는 메시지가 도착할 때 즉시 스레드를 깨우는 효율적인 커널 메커니즘(`recv()` 시스템 콜 및 `zmq_poll()`)을 사용
+3. 블로킹 기반 모드는 메시지가 도착할 때 즉시 스레드를 깨우는 효율적인 커널 메커니즘(`recv()` 시스템 콜 및 `zmq_poll()`)을 사용
 
-**메시지 크기 영향**: Sleep 오버헤드는 작은 메시지(64B)에서 가장 두드러지며 NonBlocking이 1.73배 느리고, 큰 메시지(65KB)의 경우 1.86배 느립니다.
+**메시지 크기 영향**: Sleep 오버헤드는 큰 메시지에서 더 두드러집니다. 작은 메시지(64B)에서 NonBlocking이 1.43배 느리고, 큰 메시지(65KB)의 경우 2.43배 느립니다.
 
-**권장사항**: NonBlocking 모드는 상대적으로 느리므로(25-86% 느림) 굳이 사용할 필요가 없습니다. 대부분의 시나리오에 Poller(가장 간단한 API와 최고의 전반적인 성능) 또는 단일 소켓 애플리케이션에 Blocking을 사용하세요.
+**권장사항**: NonBlocking 모드는 상대적으로 느리므로(24-143% 느림) 굳이 사용할 필요가 없습니다. 대부분의 시나리오에 Poller(다중 소켓 지원과 최고의 전반적인 성능) 또는 단일 소켓 애플리케이션에 PureBlocking/BlockingWithBatch를 사용하세요.
 
 ### 수신 모드 선택 고려사항
 
