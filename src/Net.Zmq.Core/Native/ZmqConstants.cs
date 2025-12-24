@@ -3,7 +3,7 @@ namespace Net.Zmq.Core.Native;
 /// <summary>
 /// ZeroMQ constants for socket types, options, and error codes.
 /// </summary>
-internal static class ZmqConstants
+public static class ZmqConstants
 {
     // Socket Types
     public const int ZMQ_PAIR = 0;
