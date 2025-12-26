@@ -45,6 +45,26 @@ public sealed class Message : IDisposable
     }
 
     /// <summary>
+    /// Internal constructor for MessagePool.
+    /// Allocates memory for zmq_msg_t but does NOT call zmq_msg_init().
+    /// This allows MessagePool to call zmq_msg_init_data() directly.
+    /// </summary>
+    /// <param name="skipInit">Must be true. Used to distinguish from other constructors.</param>
+    internal Message(bool skipInit)
+    {
+        if (!skipInit)
+            throw new ArgumentException("skipInit must be true", nameof(skipInit));
+
+        _msgPtr = Marshal.AllocHGlobal(ZmqMsgSize);
+        ClearMemory();
+        // NOTE: zmq_msg_init is NOT called here!
+        // Caller must call zmq_msg_init_data() or similar before using this message.
+        _initialized = false;  // Will be set to true after proper initialization
+        _actualDataSize = 0;
+        _bufferSize = 0;
+    }
+
+    /// <summary>
     /// Initializes a message with a specific size.
     /// </summary>
     /// <param name="size">The size of the message in bytes.</param>
@@ -553,7 +573,12 @@ public sealed class Message : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            // Even if already disposed, suppress finalizer to prevent any issues
+            GC.SuppressFinalize(this);
+            return;
+        }
 
         // Pool 메시지 (재사용 가능): 콜백만 호출하고 zmq_msg_t는 닫지 않음
         if (_isFromPool)
@@ -606,9 +631,11 @@ public sealed class Message : IDisposable
         // Only free unmanaged memory if not already disposed
         if (!_disposed)
         {
-            // We must call zmq_msg_close if the message was initialized,
-            // otherwise we leak ZMQ's internal resources
-            if (_initialized)
+            // We must call zmq_msg_close if the message was initialized
+            // BUT only if it was NOT successfully sent
+            // After zmq_msg_send(), the message is in "consumed" state
+            // and calling zmq_msg_close() on it causes assertion failure
+            if (_initialized && !_wasSuccessfullySent)
             {
                 LibZmq.MsgClosePtr(_msgPtr);
             }

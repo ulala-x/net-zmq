@@ -868,20 +868,25 @@ public class MessagePoolTests
         var tasks = new List<Task>();
 
         using var ctx = new Context();
-        using var push = new Socket(ctx, SocketType.Push);
+
+        // ZeroMQ 소켓은 스레드 안전하지 않으므로 각 스레드가 자신만의 소켓 사용
+        // PULL 소켓은 메인 스레드에서만 사용
         using var pull = new Socket(ctx, SocketType.Pull);
+        pull.Bind("inproc://test-concurrency");
 
-        push.Bind("inproc://test-concurrency");
-        pull.Connect("inproc://test-concurrency");
-
-        // Act - 여러 스레드에서 동시에 Rent/Send/Dispose
+        // Act - 여러 스레드에서 동시에 Rent/Send/Dispose (각자 자신의 소켓 사용)
         for (int t = 0; t < threadCount; t++)
         {
+            int threadId = t;
             tasks.Add(Task.Run(() =>
             {
+                // 각 스레드가 자신만의 PUSH 소켓 생성
+                using var push = new Socket(ctx, SocketType.Push);
+                push.Connect("inproc://test-concurrency");
+
                 for (int i = 0; i < messagesPerThread; i++)
                 {
-                    var testData = new byte[] { (byte)i, (byte)(i + 1), (byte)(i + 2) };
+                    var testData = new byte[] { (byte)threadId, (byte)i, (byte)(i + 1) };
                     using var msg = pool.Rent(testData.AsSpan());
                     push.Send(msg);
                 }

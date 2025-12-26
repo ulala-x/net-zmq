@@ -193,7 +193,9 @@ public sealed class MessagePool
     private Message CreatePooledMessage(int bucketSize, int bucketIndex)
     {
         var dataPtr = Marshal.AllocHGlobal(bucketSize);
-        var msg = new Message();
+        // skipInit=true: zmq_msg_init()를 호출하지 않고 메모리만 할당
+        // 이후 zmq_msg_init_data()를 직접 호출
+        var msg = new Message(skipInit: true);
 
         // 콜백 설정
         msg._reusableCallback = (ptr) => ReturnMessageToPool(msg);
