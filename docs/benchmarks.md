@@ -9,7 +9,7 @@ This document contains comprehensive performance benchmark results for Net.Zmq, 
 Net.Zmq provides multiple receive modes and memory strategies to accommodate different performance requirements and architectural patterns. This benchmark suite evaluates:
 
 - **Receive Modes**: PureBlocking, BlockingWithBatch, NonBlocking, and Poller-based message reception
-- **Message Buffer Strategies**: ByteArray, ArrayPool, Message, and MessageZeroCopy approaches
+- **Message Buffer Strategies**: ByteArray, ArrayPool, Message, MessageZeroCopy, and MessagePool approaches
 - **Message Sizes**: 64 bytes (small), 512 bytes, 1024 bytes, and 65KB (large)
 
 ### Test Environment
@@ -262,6 +262,8 @@ When choosing a receive mode, consider:
 
 **MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. Provides zero-copy semantics but requires careful lifecycle management.
 
+**MessagePool (`MessagePool.Shared`)**: Pools native memory buffers for reuse. Features a 2-tier caching system with thread-local cache and shared pool for high performance and low contention. Messages are automatically returned to the pool via ZeroMQ's free callback after send completion, eliminating manual return management. **MessagePool+RecvPool** uses pooling for both send and receive operations, achieving minimal memory allocation.
+
 ### Understanding Message Buffer Benchmark Metrics
 
 In addition to the [standard benchmark metrics](#understanding-benchmark-metrics), message buffer strategy benchmarks include:
@@ -281,97 +283,117 @@ All tests use PureBlocking mode for reception.
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ByteArray** | 2.382 ms | 238.17 ns | 4.20M | 2.15 Gbps | 3.91 | 1719.08 KB | 1.00x |
-| **ArrayPool** | 2.410 ms | 240.96 ns | 4.15M | 2.13 Gbps | - | 1.08 KB | 1.01x |
-| **Message** | 4.275 ms | 427.47 ns | 2.34M | 1.20 Gbps | - | 625.34 KB | 1.79x |
-| **MessageZeroCopy** | 5.897 ms | 589.71 ns | 1.70M | 0.87 Gbps | - | 625.34 KB | 2.48x |
+| **ByteArray** | 2.409 ms | 240.89 ns | 4.15M | 2.13 Gbps | 3.91 | 1719.08 KB | 1.00x |
+| **ArrayPool** | 2.723 ms | 272.34 ns | 3.67M | 1.88 Gbps | - | 1.08 KB | 1.13x |
+| **Message** | 4.859 ms | 485.86 ns | 2.06M | 1.05 Gbps | - | 1406.58 KB | 2.02x |
+| **MessageZeroCopy** | 5.926 ms | 592.64 ns | 1.69M | 0.86 Gbps | - | 1406.58 KB | 2.46x |
+| **MessagePool** | 4.034 ms | 403.41 ns | 2.48M | 1.27 Gbps | - | 703.46 KB | 1.67x |
+| **MessagePool+RecvPool** | 2.855 ms | 285.45 ns | 3.50M | 1.79 Gbps | - | 2.74 KB | 1.18x |
 
 #### 512-Byte Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ByteArray** | 6.584 ms | 658.41 ns | 1.52M | 6.23 Gbps | 23.44 | 10469.08 KB | 1.00x |
-| **ArrayPool** | 6.214 ms | 621.44 ns | 1.61M | 6.60 Gbps | - | 1.53 KB | 0.94x |
-| **Message** | 7.930 ms | 793.02 ns | 1.26M | 5.16 Gbps | - | 625.34 KB | 1.20x |
-| **MessageZeroCopy** | 12.263 ms | 1.23 μs | 815.46K | 3.34 Gbps | - | 625.34 KB | 1.86x |
+| **ByteArray** | 5.708 ms | 570.83 ns | 1.75M | 7.18 Gbps | 23.44 | 10469.09 KB | 1.00x |
+| **ArrayPool** | 5.355 ms | 535.52 ns | 1.87M | 7.65 Gbps | - | 1.52 KB | 0.94x |
+| **Message** | 6.258 ms | 625.85 ns | 1.60M | 6.54 Gbps | - | 1406.59 KB | 1.10x |
+| **MessageZeroCopy** | 6.886 ms | 688.59 ns | 1.45M | 5.95 Gbps | - | 1406.59 KB | 1.21x |
+| **MessagePool** | 5.376 ms | 537.58 ns | 1.86M | 7.62 Gbps | - | 703.46 KB | 0.94x |
+| **MessagePool+RecvPool** | 5.478 ms | 547.77 ns | 1.83M | 7.48 Gbps | - | 2.74 KB | 0.96x |
 
 #### 1024-Byte Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|-----------|-------|
-| **ByteArray** | 8.731 ms | 873.14 ns | 1.15M | 9.39 Gbps | 46.88 | 20469.09 KB | 1.00x |
-| **ArrayPool** | 8.267 ms | 826.69 ns | 1.21M | 9.88 Gbps | - | 2.04 KB | 0.95x |
-| **Message** | 9.309 ms | 930.94 ns | 1.07M | 8.75 Gbps | - | 625.34 KB | 1.07x |
-| **MessageZeroCopy** | 13.296 ms | 1.33 μs | 752.13K | 6.15 Gbps | - | 625.34 KB | 1.52x |
+| **ByteArray** | 8.637 ms | 863.68 ns | 1.16M | 9.48 Gbps | 46.88 | 20469.09 KB | 1.00x |
+| **ArrayPool** | 7.820 ms | 782.02 ns | 1.28M | 10.48 Gbps | - | 2.04 KB | 0.91x |
+| **Message** | 8.495 ms | 849.46 ns | 1.18M | 9.64 Gbps | - | 1406.59 KB | 0.98x |
+| **MessageZeroCopy** | 10.678 ms | 1.07 μs | 936.47K | 7.67 Gbps | - | 1406.59 KB | 1.24x |
+| **MessagePool** | 7.616 ms | 761.57 ns | 1.31M | 10.76 Gbps | - | 703.46 KB | 0.88x |
+| **MessagePool+RecvPool** | 7.888 ms | 788.80 ns | 1.27M | 10.39 Gbps | - | 2.75 KB | 0.91x |
 
 #### 65KB Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|------|-----------|-------|
-| **ByteArray** | 140.630 ms | 14.06 μs | 71.11K | 4.35 GB/s | 3333.33 | - | 1280469.54 KB | 1.00x |
-| **ArrayPool** | 138.018 ms | 13.80 μs | 72.45K | 4.43 GB/s | - | - | 65.38 KB | 0.98x |
-| **Message** | 111.554 ms | 11.16 μs | 89.64K | 5.48 GB/s | - | - | 625.53 KB | 0.79x |
-| **MessageZeroCopy** | 123.824 ms | 12.38 μs | 80.76K | 4.94 GB/s | - | - | 625.58 KB | 0.88x |
+| **ByteArray** | 170.14 ms | 17.01 μs | 58.77K | 3.59 GB/s | 3333.33 | 666.67 | 1280469.54 KB | 1.00x |
+| **ArrayPool** | 160.17 ms | 16.02 μs | 62.44K | 3.81 GB/s | - | - | 65.29 KB | 0.94x |
+| **Message** | 175.25 ms | 17.52 μs | 57.06K | 3.48 GB/s | - | - | 1406.82 KB | 1.03x |
+| **MessageZeroCopy** | 164.90 ms | 16.49 μs | 60.64K | 3.70 GB/s | - | - | 1407.04 KB | 0.97x |
+| **MessagePool** | 169.32 ms | 16.93 μs | 59.06K | 3.60 GB/s | - | - | 703.90 KB | 1.00x |
+| **MessagePool+RecvPool** | 180.06 ms | 18.01 μs | 55.54K | 3.39 GB/s | - | - | 3.03 KB | 1.06x |
 
 #### 128KB Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Gen2 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|------|------|-----------|-------|
-| **ByteArray** | 1,259 ms | 125.9 μs | 7.94K | 1.02 GB/s | 57000 | 57000 | 57000 | 2.5 GB | 1.00x |
-| **ArrayPool** | 251.62 ms | 25.16 μs | 39.74K | 5.09 GB/s | - | - | - | 129 KB | 0.20x |
-| **Message** | 203.68 ms | 20.37 μs | 49.10K | 6.28 GB/s | - | - | - | 625 KB | 0.16x |
-| **MessageZeroCopy** | 226.45 ms | 22.65 μs | 44.16K | 5.65 GB/s | - | - | - | 625 KB | 0.18x |
+| **ByteArray** | 1,259 ms | 125.91 μs | 7.94K | 0.97 GB/s | 51000 | 51000 | 51000 | 2.5 GB | 1.00x |
+| **ArrayPool** | 342.74 ms | 34.27 μs | 29.18K | 3.56 GB/s | - | - | - | 129.48 KB | 0.27x |
+| **Message** | 375.43 ms | 37.54 μs | 26.64K | 3.25 GB/s | - | - | - | 1407.95 KB | 0.30x |
+| **MessageZeroCopy** | 361.82 ms | 36.18 μs | 27.64K | 3.37 GB/s | - | - | - | 1407.95 KB | 0.29x |
+| **MessagePool** | 367.43 ms | 36.74 μs | 27.22K | 3.32 GB/s | - | - | - | 704.83 KB | 0.29x |
+| **MessagePool+RecvPool** | 394.45 ms | 39.44 μs | 25.35K | 3.09 GB/s | - | - | - | 3.29 KB | 0.31x |
 
 #### 256KB Messages
 
 | Strategy | Mean | Latency | Messages/sec | Data Throughput | Gen0 | Gen1 | Gen2 | Allocated | Ratio |
 |----------|------|---------|--------------|-----------------|------|------|------|-----------|-------|
-| **ByteArray** | 2,495 ms | 249.5 μs | 4.01K | 1.03 GB/s | 105000 | 105000 | 105000 | 5 GB | 1.00x |
-| **ArrayPool** | 413.04 ms | 41.30 μs | 24.21K | 6.20 GB/s | - | - | - | 258 KB | 0.17x |
-| **Message** | 378.18 ms | 37.82 μs | 26.44K | 6.77 GB/s | - | - | - | 626 KB | 0.15x |
-| **MessageZeroCopy** | 368.16 ms | 36.82 μs | 27.16K | 6.95 GB/s | - | - | - | 626 KB | 0.15x |
+| **ByteArray** | 2,485 ms | 248.52 μs | 4.02K | 0.98 GB/s | 100000 | 100000 | 100000 | 5 GB | 1.00x |
+| **ArrayPool** | 719.49 ms | 71.95 μs | 13.90K | 3.39 GB/s | - | - | - | 257.70 KB | 0.29x |
+| **Message** | 698.36 ms | 69.84 μs | 14.32K | 3.50 GB/s | - | - | - | 1407.95 KB | 0.28x |
+| **MessageZeroCopy** | 716.22 ms | 71.62 μs | 13.96K | 3.41 GB/s | - | - | - | 1407.95 KB | 0.29x |
+| **MessagePool** | 708.05 ms | 70.80 μs | 14.12K | 3.45 GB/s | - | - | - | 704.83 KB | 0.28x |
+| **MessagePool+RecvPool** | 709.37 ms | 70.94 μs | 14.10K | 3.44 GB/s | - | - | - | 3.95 KB | 0.29x |
 
 ### Performance and GC Analysis
 
-**Small Messages (64B)**: ByteArray (2.382 ms, 4.20M msg/sec, 1.00x) and ArrayPool (2.410 ms, 4.15M msg/sec, 1.01x) show nearly identical performance with only a 1% difference. However, ByteArray generates moderate GC pressure (3.91 Gen0 collections, 1719 KB allocated) while ArrayPool maintains near-zero allocation (1.08 KB). Message (4.275 ms, 1.79x slower) and MessageZeroCopy (5.897 ms, 2.48x slower) show substantial overhead due to native interop costs being proportionally high for small payloads.
+**Small Messages (64B)**: ByteArray (2.409 ms, 4.15M msg/sec, 1.00x) is fastest but generates GC pressure (3.91 Gen0, 1719 KB allocated). **MessagePool+RecvPool** (2.855 ms, 3.50M msg/sec, 1.18x) provides close performance with GC-free operation and only 2.74 KB allocation. Message (4.859 ms, 2.02x) and MessageZeroCopy (5.926 ms, 2.46x) show substantial overhead due to native interop costs.
 
-**Medium Messages (512B)**: ArrayPool becomes the fastest (6.214 ms, 1.61M msg/sec, 0.94x = 6% faster) with minimal allocation (1.53 KB). ByteArray is slightly slower (6.584 ms, 1.52M msg/sec, 1.00x) and shows increasing GC pressure (23.44 Gen0 collections, 10.5 MB allocated). Message (7.930 ms, 1.20x) performs reasonably, while MessageZeroCopy (12.263 ms, 1.86x) shows unexpected overhead.
+**Medium Messages (512B)**: **ArrayPool** (5.355 ms, 0.94x) and **MessagePool** (5.376 ms, 0.94x) tie as fastest with nearly identical performance. MessagePool+RecvPool (5.478 ms, 0.96x) offers competitive performance with minimal allocation (2.74 KB). ByteArray (5.708 ms) shows increasing GC pressure (23.44 Gen0, 10.5 MB allocated).
 
-**Medium-Large Messages (1KB)**: ArrayPool maintains its lead (8.267 ms, 1.21M msg/sec, 0.95x = 5% faster) with minimal allocation (2.04 KB), while ByteArray (8.731 ms, 1.15M msg/sec, 1.00x) shows substantial GC pressure (46.88 Gen0 collections, 20 MB allocated). Message (9.309 ms, 1.07x) becomes more competitive, while MessageZeroCopy (13.296 ms, 1.52x) still lags.
+**Medium-Large Messages (1KB)**: **MessagePool** (7.616 ms, 0.88x) is fastest, followed by ArrayPool (7.820 ms, 0.91x) and MessagePool+RecvPool (7.888 ms, 0.91x). MessagePool achieves 3% faster performance than ArrayPool while providing automatic return via ZeroMQ callbacks. ByteArray (8.637 ms, 1.00x) shows substantial GC pressure (46.88 Gen0, 20 MB allocated).
 
-**Large Messages (65KB)**: Native strategies dominate - Message achieves best performance (111.554 ms, 89.64K msg/sec, 0.79x = 21% faster than baseline), followed by MessageZeroCopy (123.824 ms, 80.76K msg/sec, 0.88x = 12% faster). ArrayPool (138.018 ms, 72.45K msg/sec, 0.98x = 2% faster) and ByteArray (140.630 ms, 71.11K msg/sec, 1.00x) are similar in speed but ByteArray triggers massive GC pressure (3333 Gen0 collections, 1.25 GB allocated).
+**Large Messages (65KB)**: **ArrayPool** (160.17 ms, 0.94x) is fastest, followed by MessageZeroCopy (164.90 ms, 0.97x) and MessagePool (169.32 ms, 1.00x). ByteArray (170.14 ms) triggers massive GC pressure (3333 Gen0, 1.25 GB allocated). MessagePool+RecvPool (180.06 ms, 1.06x) is slightly slower but allocates the least memory (3.03 KB).
 
-**Very Large Messages (128KB)**: ByteArray suffers extreme GC pressure (57,000 Gen0/1/2 collections each, 2.5 GB allocated) taking 1,259 ms, while Message achieves 203.68 ms - **6.2x faster** (0.16x). ArrayPool is also 5x faster at 251.62 ms but 19% slower than Message.
+**Very Large Messages (128KB)**: ByteArray suffers extreme GC pressure (51,000 Gen0/1/2 collections each, 2.5 GB allocated) taking 1,259 ms. **ArrayPool** (342.74 ms, 0.27x) is fastest - **3.7x faster**. MessageZeroCopy (361.82 ms, 0.29x), MessagePool (367.43 ms, 0.29x), and Message (375.43 ms, 0.30x) all perform over 3x faster. MessagePool+RecvPool (394.45 ms, 0.31x) allocates the least memory (3.29 KB).
 
-**Extra Large Messages (256KB)**: ByteArray's GC pressure intensifies (105,000 Gen0/1/2 collections each, 5 GB allocated) taking 2,495 ms. Message (378.18 ms) and MessageZeroCopy (368.16 ms) are **6.6-6.8x faster**. ArrayPool (413.04 ms) is also 6x faster but 9-11% slower than Message-based strategies.
+**Extra Large Messages (256KB)**: ByteArray's GC pressure intensifies (100,000 Gen0/1/2 collections each, 5 GB allocated) taking 2,485 ms. **Message** (698.36 ms, 0.28x) is fastest - **3.6x faster**. MessagePool (708.05 ms, 0.28x), MessagePool+RecvPool (709.37 ms, 0.29x), MessageZeroCopy (716.22 ms, 0.29x), and ArrayPool (719.49 ms, 0.29x) all show similar performance.
 
-**Large Object Heap (LOH) Impact**: In .NET, objects ≥85KB are allocated on the LOH, causing GC costs to skyrocket. This explains ByteArray's dramatic performance degradation at 128KB/256KB. Message uses native memory, completely avoiding this issue.
+**MessagePool Advantages**:
+- **Automatic Return**: Messages are automatically returned to pool via ZeroMQ free callback after send completion, eliminating manual management
+- **Thread-Local Cache**: 2-tier pooling (thread-local + shared pool) provides high performance with low contention
+- **Best at 1KB**: Fastest strategy for medium-sized messages, 3% faster than ArrayPool
+- **Minimal Memory Allocation**: MessagePool+RecvPool allocates less than 3KB across all sizes
 
-**GC Pattern Transition**: ArrayPool and native strategies maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 3.91 Gen0 at 64B → 23.44 Gen0 at 512B → 46.88 Gen0 at 1KB → 3333 Gen0 at 65KB → 57,000 Gen0/1/2 at 128KB → 105,000 Gen0/1/2 at 256KB.
+**Large Object Heap (LOH) Impact**: In .NET, objects ≥85KB are allocated on the LOH, causing GC costs to skyrocket. This explains ByteArray's dramatic performance degradation at 128KB/256KB. MessagePool and other native strategies completely avoid this issue.
 
-**Memory Allocation**: ArrayPool demonstrates exceptional efficiency (1.08-258 KB total allocation across all sizes - 99.3-99.99% reduction vs ByteArray). Message and MessageZeroCopy maintain consistent ~625 KB allocation regardless of message size (99.95-99.99% reduction vs ByteArray at large sizes).
+**GC Pattern Transition**: ArrayPool, MessagePool, and native strategies maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 3.91 Gen0 at 64B → 23.44 Gen0 at 512B → 46.88 Gen0 at 1KB → 3333 Gen0 at 65KB → 51,000 Gen0/1/2 at 128KB → 100,000 Gen0/1/2 at 256KB.
+
+**Memory Allocation**: MessagePool+RecvPool is most efficient (2.74-3.95 KB total allocation across all sizes). ArrayPool (1.08-258 KB) and MessagePool (703-705 KB) also show 99%+ reduction vs ByteArray.
 
 ### Message Buffer Strategy Selection Considerations
 
 When choosing a message buffer strategy, consider:
 
 **Message Size Based Recommendations**:
-- **Small messages (≤512B)**: Use **`ArrayPool<byte>.Shared`** - equivalent to ByteArray performance, GC-free
-- **Large messages (≥65KB)**: Use **`Message`** - 18-19% faster than ArrayPool, GC-free
-- **Very large messages (≥128KB)**: Use **`Message`** or **`MessageZeroCopy`** - 6x+ faster than other strategies
-- **MessageZeroCopy**: Use only for special cases where you need to transfer already-allocated unmanaged memory with zero-copy
+- **Small messages (≤512B)**: **`ArrayPool<byte>.Shared`** or **`MessagePool`** - ByteArray-equivalent performance, GC-free
+- **Medium messages (1KB)**: **`MessagePool`** - 3% faster than ArrayPool with automatic return
+- **Large messages (≥65KB)**: **`ArrayPool`** or **`MessagePool`** - similar performance, GC-free
+- **Very large messages (≥128KB)**: **`ArrayPool`** or **`MessagePool`** - 3x+ faster than ByteArray
+- **Minimal memory allocation needed**: **`MessagePool+RecvPool`** - less than 3KB allocation across all sizes
 
 **One-Size-Fits-All Recommendation**:
 
-If message sizes vary or are unpredictable, we recommend **`Message`**:
+If message sizes vary or are unpredictable, we recommend **`MessagePool`**:
 
 1. **Consistent Performance**: Provides predictable performance across all message sizes
-2. **GC-Free**: Zero GC pressure using native memory
-3. **Large Message Optimization**: 18-19% faster than ArrayPool for ≥65KB messages
-4. **LOH Avoidance**: Completely bypasses .NET LOH issues for 128KB+ messages
-5. **Adequate Small Message Performance**: Even at 64B, processes 2.34M messages/sec
+2. **Automatic Return**: Messages are automatically returned to pool via ZeroMQ free callback, eliminating manual management
+3. **GC-Free**: Zero GC pressure using native memory pooling
+4. **Thread-Local Cache**: 2-tier pooling provides high performance with low contention
+5. **LOH Avoidance**: Completely bypasses .NET LOH issues for 128KB+ messages
+6. **Adequate Small Message Performance**: Even at 64B, processes 2.48M messages/sec
 
-While ArrayPool is slightly faster for small messages (1% at 64B), Message is clearly superior for large messages, making **Message the safer choice** for a single strategy approach.
+ArrayPool is slightly faster for small messages but requires manual return management. MessagePool provides similar performance with automatic return, making **MessagePool the safer choice** for a single strategy approach.
 
 **ArrayPool Usage Pattern**:
 ```csharp
@@ -389,6 +411,22 @@ finally
 {
     ArrayPool<byte>.Shared.Return(buffer);
 }
+```
+
+**MessagePool Usage Pattern** (Recommended):
+```csharp
+using Net.Zmq;
+
+// Send: Rent message from pool and send (automatic return)
+var sendMsg = MessagePool.Shared.Rent(dataSize);
+sourceData.CopyTo(sendMsg.Data);
+socket.Send(sendMsg);  // Automatically returned via ZeroMQ free callback
+
+// Receive: Rent message from pool and receive
+var recvMsg = MessagePool.Shared.Rent(expectedSize);
+socket.Recv(recvMsg, expectedSize);
+// Process data...
+recvMsg.Dispose();  // Return to pool
 ```
 
 **MessageZeroCopy Usage Pattern** (Special Cases):

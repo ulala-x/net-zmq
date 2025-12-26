@@ -193,10 +193,11 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ### Recommended Approach
 
-**Message Buffer Strategy: Use `Message`**
+**Message Buffer Strategy: Use `MessagePool`**
 - Consistent performance across all message sizes
-- GC-free (native memory)
-- Up to 6x faster at 128KB+ messages
+- GC-free (native memory pooling)
+- Automatic return via ZeroMQ free callback (no manual management)
+- Up to 3x faster than ByteArray at 128KB+ messages
 - Avoids .NET Large Object Heap issues
 
 **Receive Mode:**
@@ -204,6 +205,11 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 - Multiple sockets → `Poller`
 
 ```csharp
+// Recommended: MessagePool for sending (automatic return)
+var sendMsg = MessagePool.Shared.Rent(dataSize);
+sourceData.CopyTo(sendMsg.Data);
+socket.Send(sendMsg);  // Automatically returned to pool
+
 // Recommended: Blocking receive with Message
 using var msg = new Message();
 socket.Recv(msg);

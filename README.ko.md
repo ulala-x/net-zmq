@@ -193,10 +193,11 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ### 권장 방식
 
-**메시지 버퍼 전략: `Message` 사용**
+**메시지 버퍼 전략: `MessagePool` 사용**
 - 모든 메시지 크기에서 일관된 성능
-- GC 프리 (네이티브 메모리)
-- 128KB 이상에서 최대 6배 빠름
+- GC 프리 (네이티브 메모리 풀링)
+- ZeroMQ free callback을 통한 자동 반환 (수동 관리 불필요)
+- 128KB 이상에서 ByteArray 대비 최대 3배 빠름
 - .NET Large Object Heap 문제 회피
 
 **수신 모드:**
@@ -204,6 +205,11 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 - 다중 소켓 → `Poller`
 
 ```csharp
+// 권장: MessagePool으로 송신 (자동 반환)
+var sendMsg = MessagePool.Shared.Rent(dataSize);
+sourceData.CopyTo(sendMsg.Data);
+socket.Send(sendMsg);  // 풀에 자동 반환
+
 // 권장: Blocking 수신 + Message
 using var msg = new Message();
 socket.Recv(msg);
