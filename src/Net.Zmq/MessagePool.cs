@@ -115,7 +115,12 @@ public sealed class MessagePool
     /// </summary>
     public static MessagePool Shared { get; } = new();
 
-    // 재사용 가능한 Message 객체 풀
+    // Tier 1: Thread-local cache (lock-free, fastest)
+    // Each bucket has its own cache with a count to track the number of items
+    private readonly ThreadLocal<(Message?[] cache, int count)[]> _threadLocalCache;
+    private const int ThreadLocalCacheSize = 8;
+
+    // Tier 2: Shared pool (ConcurrentStack, slower but shared across threads)
     private readonly ConcurrentStack<Message>[] _pooledMessages;
 
     // Per-bucket Interlocked counters for O(1) thread-safe maxBuffer enforcement
@@ -139,6 +144,17 @@ public sealed class MessagePool
         {
             _pooledMessages[i] = new ConcurrentStack<Message>();
         }
+
+        // Initialize thread-local cache with count tracking for O(1) access
+        _threadLocalCache = new ThreadLocal<(Message?[] cache, int count)[]>(() =>
+        {
+            var buckets = new (Message?[] cache, int count)[BucketSizes.Length];
+            for (int i = 0; i < buckets.Length; i++)
+            {
+                buckets[i] = (new Message?[ThreadLocalCacheSize], 0);
+            }
+            return buckets;
+        }, trackAllValues: false);
     }
 
     /// <summary>
@@ -227,12 +243,29 @@ public sealed class MessagePool
         if (Interlocked.CompareExchange(ref msg._callbackExecuted, 1, 0) == 0)
         {
             int bucketIndex = msg._poolBucketIndex;
+            msg.ReturnToPool();
 
-            // Check if pool has room using Interlocked counter (O(1), thread-safe)
+            // Tier 1: Try to return to thread-local cache first (lock-free, fastest, O(1) access)
+            // Thread-local cache doesn't count toward maxBuffer limit (like ArrayPool)
+            var cache = _threadLocalCache.Value;
+            if (cache != null)
+            {
+                ref var bucket = ref cache[bucketIndex];
+                if (bucket.count < ThreadLocalCacheSize)
+                {
+                    bucket.cache[bucket.count] = msg;
+                    bucket.count++;
+#if DEBUG
+                    Interlocked.Increment(ref _totalReturns);
+#endif
+                    return;
+                }
+            }
+
+            // Tier 2: Thread-local cache is full, try to return to shared pool
+            // Check if shared pool has room using Interlocked counter (O(1), thread-safe)
             if (Interlocked.Read(ref _pooledMessageCounts[bucketIndex]) < MaxBuffersPerBucket[bucketIndex])
             {
-                // Pool has room - return message for reuse
-                msg.ReturnToPool();
                 _pooledMessages[bucketIndex].Push(msg);
                 Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
 #if DEBUG
@@ -241,7 +274,7 @@ public sealed class MessagePool
             }
             else
             {
-                // Pool is full - actually dispose the message
+                // Both thread-local cache and shared pool are full - actually dispose the message
                 msg.DisposePooledMessage();
 #if DEBUG
                 Interlocked.Increment(ref _totalReturns);
@@ -336,6 +369,26 @@ public sealed class MessagePool
             return msg;
         }
 
+        // Tier 1: Try thread-local cache first (lock-free, fastest, O(1) access)
+        var cache = _threadLocalCache.Value;
+        if (cache != null)
+        {
+            ref var bucket = ref cache[bucketIndex];
+            if (bucket.count > 0)
+            {
+                bucket.count--;
+                var msg = bucket.cache[bucket.count]!;
+                bucket.cache[bucket.count] = null;
+                msg.PrepareForReuse();
+#if DEBUG
+                Interlocked.Increment(ref _poolHits);
+                Interlocked.Increment(ref _totalRents);
+#endif
+                return msg;
+            }
+        }
+
+        // Tier 2: Try shared pool (ConcurrentStack)
         if (_pooledMessages[bucketIndex].TryPop(out var pooledMsg))
         {
             Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
