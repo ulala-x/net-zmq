@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-26
+
+### Added
+- **MessagePool** - Native memory buffer reuse with thread-local cache for high-performance scenarios
+- **MessagePool benchmarks** - Performance comparison with other memory strategies
+- **Application-level error codes** - `EBUFFERSMALL` and `ESIZEMISMATCH` constants in ZmqConstants
+- **Descriptive exception messages** - ZmqException now includes meaningful error descriptions for buffer validation errors
+
+### Changed
+- **ZmqException improvements** - Buffer validation errors now throw with specific error codes and descriptive messages instead of relying on errno
+
+### Fixed
+- **Benchmark fairness** - Removed shared receive buffer to ensure accurate performance measurements
+
 ## [0.2.0] - 2025-12-22
 
 ### Changed
