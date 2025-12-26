@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
 
@@ -6,6 +7,26 @@ namespace Net.Zmq.Tests;
 [Collection("Sequential")]
 public class MessagePoolTests
 {
+    // Statistics are only tracked in DEBUG builds for performance reasons.
+    // Use this property to conditionally check stats in tests.
+#if DEBUG
+    private static bool StatsEnabled => true;
+#else
+    private static bool StatsEnabled => false;
+#endif
+
+    private static void AssertStatsIf(bool condition, Action assertion)
+    {
+        if (StatsEnabled && condition)
+            assertion();
+    }
+
+    private static void AssertStats(Action assertion)
+    {
+        if (StatsEnabled)
+            assertion();
+    }
+
     [Fact]
     public void RentWithoutSend_ShouldReturnBufferToPool()
     {
@@ -24,9 +45,12 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "buffer should be returned when message is not sent");
-        stats.Rents.Should().Be(1);
-        stats.Returns.Should().Be(1);
+        AssertStats(() =>
+        {
+            stats.OutstandingMessages.Should().Be(0, "buffer should be returned when message is not sent");
+            stats.Rents.Should().Be(1);
+            stats.Returns.Should().Be(1);
+        });
     }
 
     [Fact]
@@ -58,9 +82,12 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned via ZMQ callback
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "buffer should be returned after ZMQ finishes transmission");
-        stats.Rents.Should().Be(1);
-        stats.Returns.Should().Be(1);
+        AssertStats(() =>
+        {
+            stats.OutstandingMessages.Should().Be(0, "buffer should be returned after ZMQ finishes transmission");
+            stats.Rents.Should().Be(1);
+            stats.Returns.Should().Be(1);
+        });
     }
 
     [Fact]
@@ -83,9 +110,12 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all buffers should be returned");
-        stats.Rents.Should().Be(count);
-        stats.Returns.Should().Be(count);
+        AssertStats(() =>
+        {
+            stats.OutstandingMessages.Should().Be(0, "all buffers should be returned");
+            stats.Rents.Should().Be(count);
+            stats.Returns.Should().Be(count);
+        });
     }
 
     [Fact]
@@ -131,14 +161,20 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all buffers should be returned regardless of send status");
-        stats.Rents.Should().Be(3);
-        stats.Returns.Should().Be(3);
+        AssertStats(() =>
+        {
+            stats.OutstandingMessages.Should().Be(0, "all buffers should be returned regardless of send status");
+            stats.Rents.Should().Be(3);
+            stats.Returns.Should().Be(3);
+        });
     }
 
     [Fact]
     public void PoolStatistics_ShouldTrackCorrectly()
     {
+        // This test only makes sense when stats are enabled (DEBUG mode)
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         var data = new byte[] { 1, 2, 3, 4, 5 };
@@ -202,7 +238,7 @@ public class MessagePoolTests
         // Assert - Statistics should show correct return count
         // Each message's callback should execute exactly once
         var stats = pool.GetStatistics();
-        stats.Returns.Should().BeGreaterOrEqualTo(2, "each disposal should trigger callback exactly once");
+        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(2, "each disposal should trigger callback exactly once"));
     }
 
     [Fact]
@@ -230,12 +266,15 @@ public class MessagePoolTests
 
         // Assert - Statistics should show all cycles completed
         var stats = pool.GetStatistics();
-        stats.Rents.Should().BeGreaterOrEqualTo(cycleCount, "should track all rent operations");
+        AssertStats(() => stats.Rents.Should().BeGreaterOrEqualTo(cycleCount, "should track all rent operations"));
     }
 
     [Fact]
     public void Rent_ShouldNotLeakMessages()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.B64, 10);
@@ -301,7 +340,7 @@ public class MessagePoolTests
 
         // Assert - 메시지가 반환되고 풀 통계가 갱신되는지 확인
         var stats = pool.GetStatistics();
-        stats.Rents.Should().Be(1, "one message was rented");
+        AssertStats(() => stats.Rents.Should().Be(1, "one message was rented"));
     }
 
     [Fact]
@@ -331,8 +370,11 @@ public class MessagePoolTests
 
         // Assert - Pool should reuse messages
         var stats = pool.GetStatistics();
-        stats.Rents.Should().Be(2, "two messages were rented");
-        stats.PoolHits.Should().BeGreaterThan(0, "at least one message should be reused from pool");
+        AssertStats(() =>
+        {
+            stats.Rents.Should().Be(2, "two messages were rented");
+            stats.PoolHits.Should().BeGreaterThan(0, "at least one message should be reused from pool");
+        });
     }
 
     [Fact]
@@ -395,7 +437,7 @@ public class MessagePoolTests
         Thread.Sleep(50);
 
         var stats = pool.GetStatistics();
-        stats.Returns.Should().BeGreaterOrEqualTo(1);
+        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1));
     }
 
     [Fact]
@@ -445,8 +487,11 @@ public class MessagePoolTests
 
         // Assert - Message 객체가 재사용되는지 검증
         var stats = pool.GetStatistics();
-        stats.PoolHits.Should().BeGreaterThan(0, "messages should be reused from pool");
-        stats.Rents.Should().Be(3);
+        AssertStats(() =>
+        {
+            stats.PoolHits.Should().BeGreaterThan(0, "messages should be reused from pool");
+            stats.Rents.Should().Be(3);
+        });
     }
 
     // ======================
@@ -495,7 +540,7 @@ public class MessagePoolTests
 
         // Assert
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
+        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
@@ -544,7 +589,7 @@ public class MessagePoolTests
 
         // Assert - 이전 데이터가 남아있지 않은지 확인 (PrepareForReuse 검증)
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all messages returned");
+        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages returned"));
     }
 
     [Fact]
@@ -622,7 +667,7 @@ public class MessagePoolTests
         Thread.Sleep(100);
 
         var stats = pool.GetStatistics();
-        stats.Returns.Should().BeGreaterOrEqualTo(1, "message should be returned via callback");
+        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1, "message should be returned via callback"));
     }
 
     [Fact]
@@ -659,7 +704,7 @@ public class MessagePoolTests
 
         // Assert - Dispose 시 풀에 반환되는지
         var statsAfter = pool.GetStatistics();
-        statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return to pool");
+        AssertStats(() => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return to pool"));
     }
 
     [Fact]
@@ -689,7 +734,7 @@ public class MessagePoolTests
 
         // Assert - ZMQ callback으로 풀에 반환되는지
         var statsAfter = pool.GetStatistics();
-        statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return via ZMQ callback");
+        AssertStats(() => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return via ZMQ callback"));
     }
 
     // ======================
@@ -712,7 +757,7 @@ public class MessagePoolTests
         // Assert - 안전성
         msg._disposed.Should().BeTrue();
         var stats = pool.GetStatistics();
-        stats.Returns.Should().BeGreaterOrEqualTo(1); // 한 번만 반환되어야 함
+        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1)); // 한 번만 반환되어야 함
     }
 
     [Fact]
@@ -759,7 +804,7 @@ public class MessagePoolTests
 
         // Assert - 각각 올바르게 동작하는지 확인
         var stats = pool.GetStatistics();
-        stats.Rents.Should().BeGreaterOrEqualTo(1);
+        AssertStats(() => stats.Rents.Should().BeGreaterOrEqualTo(1));
     }
 
     [Fact]
@@ -782,7 +827,7 @@ public class MessagePoolTests
         Thread.Sleep(100);
 
         var stats = pool.GetStatistics();
-        stats.PoolHits.Should().BeGreaterThan(0, "some messages should be reused from prewarmed pool");
+        AssertStats(() => stats.PoolHits.Should().BeGreaterThan(0, "some messages should be reused from prewarmed pool"));
     }
 
     [Fact]
@@ -859,8 +904,11 @@ public class MessagePoolTests
 
         // Assert - 스레드 안전성 검증
         var stats = pool.GetStatistics();
-        stats.Rents.Should().BeGreaterOrEqualTo(threadCount * messagesPerThread);
-        stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
+        AssertStats(() =>
+        {
+            stats.Rents.Should().BeGreaterOrEqualTo(threadCount * messagesPerThread);
+            stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
+        });
     }
 
     // ======================
@@ -1086,7 +1134,7 @@ public class MessagePoolTests
         Thread.Sleep(200);
 
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
+        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
@@ -1177,7 +1225,7 @@ public class MessagePoolTests
 
         // Assert - 매번 올바른 크기만 사용되는지 (PrepareForReuse 검증)
         var stats = pool.GetStatistics();
-        stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
+        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
@@ -1431,6 +1479,9 @@ public class MessagePoolTests
     [Fact]
     public void Dispose_WhenMaxBufferExceeded_ActuallyDisposesMessage()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.B64, 2); // Limit to 2 buffers
@@ -1463,6 +1514,9 @@ public class MessagePoolTests
     [Fact]
     public void SetMaxBuffers_DynamicChange_AppliesImmediately()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.B128, 5);
@@ -1500,6 +1554,9 @@ public class MessagePoolTests
     [Fact]
     public void Dispose_MaxBufferExceeded_ReleasesNativeMemory()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.B256, 1);
@@ -1531,6 +1588,9 @@ public class MessagePoolTests
     [Fact]
     public async Task Dispose_Concurrent_MaxBufferRespected()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.B512, 10); // Limit to 10 buffers
@@ -1568,6 +1628,9 @@ public class MessagePoolTests
     [Fact]
     public void Prewarm_WithDispose_RespectsMaxBuffer()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         pool.SetMaxBuffers(MessageSize.K1, 5);
@@ -1633,6 +1696,9 @@ public class MessagePoolTests
     [Fact]
     public void Dispose_AlreadyDisposedPooledMessage_DoesNotReturnToPool()
     {
+        // This test relies on stats tracking which is only available in DEBUG mode
+        if (!StatsEnabled) return;
+
         // Arrange
         var pool = new MessagePool();
         var msg = pool.Rent(64);
@@ -1755,7 +1821,7 @@ public class MessagePoolTests
         msg.Dispose();
 
         var statsAfter = pool.GetStatistics();
-        statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers");
+        AssertStats(() => statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers"));
 
         socket.Dispose();
         ctx.Dispose();
