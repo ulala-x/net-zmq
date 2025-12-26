@@ -32,7 +32,6 @@ public class MessageBufferStrategyBenchmarks
     [Params(10000)]
     public int MessageCount { get; set; }
 
-    private byte[] _recvBuffer = null!; // Fixed buffer for direct recv
     private byte[] _identityBuffer = null!; // Buffer for identity frame
 
     private Context _ctx = null!;
@@ -43,7 +42,6 @@ public class MessageBufferStrategyBenchmarks
     public void Setup()
     {
         // Initialize buffers
-        _recvBuffer = new byte[(int)MessageSize];
         _identityBuffer = new byte[64];
 
         // Create ZeroMQ context
@@ -68,7 +66,8 @@ public class MessageBufferStrategyBenchmarks
         _router1.Recv(_identityBuffer);
 
         // Prewarm the message pool for benchmarks
-        MessagePool.Shared.Prewarm((Net.Zmq.MessageSize)MessageSize, 100);
+        // Need enough buffers for concurrent in-flight messages
+        MessagePool.Shared.Prewarm((Net.Zmq.MessageSize)MessageSize, 500);
     }
 
     [GlobalCleanup]
@@ -108,13 +107,10 @@ public class MessageBufferStrategyBenchmarks
             {
                 // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
-                // Receive data frame (blocking)
-                int size = _router2.Recv(_recvBuffer);
-
-                // Simulate external delivery: create new output buffer (GC pressure!)
-                var outputBuffer = new byte[size];
-                _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
-                // External consumer would use outputBuffer here
+                // Receive data frame directly into new buffer (GC pressure!)
+                var recvBuffer = new byte[(int)MessageSize];
+                _router2.Recv(recvBuffer);
+                // External consumer would use recvBuffer here
             }
             countdown.Signal();
         });
@@ -153,19 +149,16 @@ public class MessageBufferStrategyBenchmarks
             {
                 // Receive identity frame (blocking)
                 _router2.Recv(_identityBuffer);
-                // Receive data frame (blocking)
-                int size = _router2.Recv(_recvBuffer);
-
-                // Simulate external delivery: rent from pool (minimal GC!)
-                var outputBuffer = ArrayPool<byte>.Shared.Rent(size);
+                // Receive data frame directly into pooled buffer (minimal GC!)
+                var recvBuffer = ArrayPool<byte>.Shared.Rent((int)MessageSize);
                 try
                 {
-                    _recvBuffer.AsSpan(0, size).CopyTo(outputBuffer);
-                    // External consumer would use outputBuffer[0..size] here
+                    _router2.Recv(recvBuffer.AsSpan(0, (int)MessageSize));
+                    // External consumer would use recvBuffer[0..MessageSize] here
                 }
                 finally
                 {
-                    ArrayPool<byte>.Shared.Return(outputBuffer);
+                    ArrayPool<byte>.Shared.Return(recvBuffer);
                 }
             }
             countdown.Signal();
