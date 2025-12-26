@@ -438,7 +438,7 @@ public sealed class Socket : IDisposable
 
         if (message.BufferSize < expectSize)
         {
-            throw new ZmqException();
+            throw new ZmqException(ZmqConstants.EBUFFERSMALL, "Buffer size is smaller than expected");
         }
 
         int actualSize = Recv(message.DataPtr, message.BufferSize, flags);
@@ -447,7 +447,7 @@ public sealed class Socket : IDisposable
             return -1;
 
         if (actualSize != expectSize)
-            throw new ZmqException();
+            throw new ZmqException(ZmqConstants.ESIZEMISMATCH, "Received size does not match expected size");
 
         // Update actual data size for pooled messages
         message._actualDataSize = actualSize;

@@ -168,6 +168,10 @@ public static class ZmqConstants
     public const int EINVAL = 22;
     public const int EMFILE = 24;
 
+    // Application-level error codes
+    public const int EBUFFERSMALL = ZMQ_HAUSNUMERO + 100;
+    public const int ESIZEMISMATCH = ZMQ_HAUSNUMERO + 101;
+
     // Socket Monitor Events
     public const int ZMQ_EVENT_CONNECTED = 1;
     public const int ZMQ_EVENT_CONNECT_DELAYED = 2;
