@@ -419,6 +419,42 @@ public sealed class Socket : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Receives a message into a pooled message buffer with expected size validation.
+    /// This method is optimized for use with MessagePool where the message has a pre-allocated buffer.
+    /// </summary>
+    /// <param name="message">The pooled message to receive into.</param>
+    /// <param name="expectSize">The expected size of the message to receive.</param>
+    /// <param name="flags">Receive flags. If DontWait flag is set and no message is available (EAGAIN), returns -1 instead of throwing.</param>
+    /// <returns>
+    /// The number of bytes received, or -1 if DontWait flag was set and no message is available (EAGAIN).
+    /// </returns>
+    /// <exception cref="ZmqException">
+    /// Thrown if the message buffer is too small, if the received size doesn't match expected size, or if the operation fails.
+    /// </exception>
+    public int Recv(Message message, int expectSize, RecvFlags flags = RecvFlags.None)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (message.BufferSize < expectSize)
+        {
+            throw new ZmqException();
+        }
+
+        int actualSize = Recv(message.DataPtr, message.BufferSize, flags);
+
+        if (actualSize == -1)
+            return -1;
+
+        if (actualSize != expectSize)
+            throw new ZmqException();
+
+        // Update actual data size for pooled messages
+        message._actualDataSize = actualSize;
+
+        return actualSize;
+    }
+
     #endregion
 
     #region Socket Options
