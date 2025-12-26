@@ -158,6 +158,8 @@ Net.Zmq는 송수신 작업을 위한 여러 메시지 버퍼 관리 전략을 �
 
 **MessageZeroCopy**: 언매니지드 메모리를 직접 할당(`Marshal.AllocHGlobal`)하고 프리 콜백을 통해 libzmq에 소유권을 전달합니다. 관리 메모리를 완전히 피함으로써 진정한 제로카피 시맨틱을 제공하지만, 신중한 라이프사이클 관리가 필요합니다.
 
+**MessagePool**: cppzmq에는 없는 Net.Zmq만의 독점 기능으로, 네이티브 메모리 버퍼를 풀링하고 재사용하여 GC 압력을 제거하고 고성능 메시징을 가능하게 합니다. 수동 `Return()` 호출이 필요한 ArrayPool과 달리, MessagePool은 전송이 완료되면 ZeroMQ의 프리 콜백을 통해 버퍼를 자동으로 풀에 반환합니다.
+
 #### 사용 예제
 
 ByteArray 접근 방식은 표준 .NET 배열을 사용합니다:
@@ -236,6 +238,59 @@ using var message = new Message(nativePtr, dataSize, ptr =>
 socket.Send(message);
 ```
 
+MessagePool 전송 접근 방식:
+
+```csharp
+using var socket = new Socket(context, SocketType.Push);
+socket.Connect("tcp://localhost:5555");
+
+// 기본 사용법: 지정된 크기의 버퍼 대여
+var msg = MessagePool.Shared.Rent(1024);
+socket.Send(msg);  // 전송 완료 시 자동으로 풀에 반환됨
+
+// 데이터와 함께 대여: 데이터를 풀링된 버퍼에 복사
+var data = new byte[1024];
+var msg = MessagePool.Shared.Rent(data);
+socket.Send(msg);
+
+// 예측 가능한 성능을 위한 풀 프리워밍
+MessagePool.Shared.Prewarm(MessageSize.K1, 500);  // 500개의 1KB 버퍼를 미리 할당
+```
+
+MessagePool 수신 접근 방식 (크기 선행 프로토콜):
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// 송신자 측: 메시지에 크기를 접두사로 붙임
+var payload = new byte[8192];
+socket.Send(BitConverter.GetBytes(payload.Length), SendFlags.SendMore);
+socket.Send(payload);
+
+// 수신자 측: 먼저 크기를 읽은 다음 풀링된 버퍼로 수신
+var sizeBuffer = new byte[4];
+socket.Recv(sizeBuffer);
+int expectedSize = BitConverter.ToInt32(sizeBuffer);
+
+var msg = MessagePool.Shared.Rent(expectedSize);
+socket.Recv(msg, expectedSize);  // 알려진 크기로 수신
+ProcessMessage(msg.Data);
+```
+
+MessagePool 수신 접근 방식 (고정 크기 메시지):
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// 메시지 크기가 고정되어 있고 알려져 있을 때
+const int FixedMessageSize = 1024;
+var msg = MessagePool.Shared.Rent(FixedMessageSize);
+socket.Recv(msg, FixedMessageSize);
+ProcessMessage(msg.Data);
+```
+
 #### 성능 및 GC 특성
 
 Poller 모드를 사용한 ROUTER-to-ROUTER 패턴에서 벤치마크 (10,000 메시지, Intel Core Ultra 7 265K):
@@ -275,35 +330,183 @@ Poller 모드를 사용한 ROUTER-to-ROUTER 패턴에서 벤치마크 (10,000 �
 
 ArrayPool, Message, MessageZeroCopy는 메시지 크기에 관계없이 제로 GC 컬렉션을 유지하여 GC에 민감한 애플리케이션에 대한 효과를 보여줍니다.
 
+#### MessagePool: Net.Zmq 독점 기능
+
+MessagePool은 cppzmq나 다른 ZeroMQ 바인딩에는 없는 Net.Zmq만의 고유 기능으로, 고성능 GC 프리 메시징을 위한 풀링된 네이티브 메모리 버퍼를 제공합니다.
+
+**아키텍처: 2단계 캐싱 시스템**
+
+MessagePool은 최적의 성능을 위해 정교한 2단계 캐싱 아키텍처를 사용합니다:
+
+- **1단계 - 스레드 로컬 캐시**: 각 스레드는 버킷당 8개의 버퍼를 가진 락 프리 캐시를 유지하여 락 경합을 최소화
+- **2단계 - 공유 풀**: 스레드 로컬 캐시가 소진되었을 때 전역 풀 역할을 하는 스레드 안전 `ConcurrentStack`
+- **19개 크기 버킷**: 16바이트에서 4MB까지 2의 거듭제곱 크기로 구성된 버퍼로 효율적인 할당
+
+**주요 장점**
+
+1. **제로 GC 압력**: 네이티브 메모리 버퍼를 재사용하여 Gen0/Gen1/Gen2 컬렉션 제거
+2. **자동 반환**: 수동 `Return()` 호출이 필요한 ArrayPool과 달리, MessagePool은 전송 완료 시 ZeroMQ의 프리 콜백을 통해 자동으로 버퍼 반환
+3. **완벽한 ZeroMQ 통합**: ZeroMQ의 제로카피 아키텍처와 완벽하게 통합
+4. **락 프리 고속 경로**: 스레드 로컬 캐시는 고처리량 시나리오에서 락 프리 액세스 제공
+5. **뛰어난 성능**: 1KB 메시지에서 ByteArray보다 12% 빠르며, 128KB 메시지에서 3.4배 빠름
+
+**성능 비교**
+
+PUSH-to-PULL 패턴에서 벤치마크 (10,000 메시지, Intel Core Ultra 7 265K):
+
+| 메시지 크기 | MessagePool | ByteArray | ArrayPool | ByteArray 대비 속도 향상 |
+|-------------|-------------|-----------|-----------|------------------------|
+| 64B         | 1.881 ms    | 1.775 ms  | 1.793 ms  | 0.95x (5% 느림)        |
+| 1KB         | 5.314 ms    | 6.048 ms  | 5.361 ms  | 1.14x (12% 빠름)       |
+| 128KB       | 342.125 ms  | 1159.675 ms | 367.083 ms | 3.39x (239% 빠름)    |
+| 256KB       | 708.083 ms  | 2399.208 ms | 719.708 ms | 3.39x (239% 빠름)    |
+
+**GC 컬렉션 (10,000 메시지)**
+
+| 메시지 크기 | MessagePool | ByteArray | ArrayPool |
+|-------------|-------------|-----------|-----------|
+| 64B         | 0 GC        | 10 Gen0   | 0 GC      |
+| 1KB         | 0 GC        | 98 Gen0   | 0 GC      |
+| 128KB       | 0 GC        | 9766 Gen0 + 9765 Gen1 + 7 Gen2 | 0 GC |
+| 256KB       | 0 GC        | 19531 Gen0 + 19530 Gen1 + 13 Gen2 | 0 GC |
+
+**트레이드오프 및 제약사항**
+
+*메모리 관련:*
+- 네이티브 메모리 점유: 풀링된 버퍼는 관리되는 힙이 아닌 네이티브 메모리에 상주
+- 잠재적인 메모리 오버헤드: 버킷당 최대 `MaxBuffers × BucketSize`만큼의 네이티브 메모리 점유 가능
+- GC 대상이 아니지만 프로세스 메모리에 포함됨
+
+*성능 특성:*
+- 작은 메시지 (64B): 콜백 오버헤드로 인해 ByteArray보다 약간 느림 (~5%)
+- 중간 메시지 (1KB-128KB): ByteArray보다 크게 빠름 (12-239%)
+- 대부분의 크기에서 ArrayPool과 비슷하지만, 자동 반환이라는 추가 이점 제공
+
+*수신 제약사항 (중요):*
+- **수신 작업 시 메시지 크기를 미리 알아야 함**
+- 수신 전에 적절한 크기의 버퍼를 대여해야 함
+- 두 가지 일반적인 해결 방법:
+  1. **크기 선행 프로토콜**: 선행 프레임에서 메시지 크기 전송
+  2. **고정 크기 메시지**: 미리 정의된 상수 메시지 크기 사용
+- 프로토콜 지원 없이 동적 크기 메시지 수신에는 부적합
+
+**MessagePool 사용 시기**
+
+**권장: 가능한 모든 경우에 MessagePool 사용**
+
+MessagePool은 제로 GC 압력, 자동 버퍼 반환, 높은 성능으로 인해 대부분의 시나리오에서 기본 선택이어야 합니다.
+
+**전송 시:**
+- 전송할 때는 항상 MessagePool 사용 - 더 나은 성능과 제로 GC 압력 제공
+- 중대형 메시지(>1KB)에서 특히 유리
+- 작은 메시지(64B)에서도 5% 오버헤드는 GC 이점에 비해 무시할 수 있음
+
+**수신 시:**
+- 메시지 크기를 알 수 있을 때 MessagePool 사용:
+  - **크기 선행 프로토콜**: `[size][payload]`를 멀티파트 메시지로 전송
+  - **고정 크기 메시지**: 상수 메시지 크기 사용
+- 크기를 알 수 없고 예측할 수 없을 때만 `Message`로 폴백
+
+**실제로는 크기를 거의 항상 알 수 있음:**
+- ZeroMQ 멀티파트 메시지는 크기 선행을 쉽게 만듦: `socket.Send(size, SendFlags.SendMore); socket.Send(payload);`
+- 4바이트 크기 접두사 전송 오버헤드는 GC 절감에 비해 미미함
+- 대부분의 실제 프로토콜은 이미 메시지 프레이밍이나 크기 정보를 포함
+
+**대안: 크기를 정말 알 수 없을 때**
+- 사전에 크기를 알 수 없는 경우 수신에 `Message` 사용
+- ArrayPool 벤치마크조차 고정 길이 메시지를 가정함
+- 고정 버퍼로 읽고 복사하는 방식은 복사 오버헤드로 인해 더 느림
+- 실제로 이러한 시나리오는 드뭄 - 대부분의 프로토콜은 크기 표시를 지원
+
+**사용 모범 사례**
+
+```csharp
+// 권장: 가변 크기 메시지를 위한 크기 선행 프로토콜
+// 송신자
+var payload = GeneratePayload();
+socket.Send(BitConverter.GetBytes(payload.Length), SendFlags.SendMore);
+socket.Send(MessagePool.Shared.Rent(payload));
+
+// 수신자
+var sizeBuffer = new byte[4];
+socket.Recv(sizeBuffer);
+int size = BitConverter.ToInt32(sizeBuffer);
+var msg = MessagePool.Shared.Rent(size);
+socket.Recv(msg, size);
+
+// 권장: 고정 크기 메시지
+const int MessageSize = 1024;
+var msg = MessagePool.Shared.Rent(MessageSize);
+socket.Send(msg);
+
+// 선택사항: 일관된 성능을 위한 풀 프리워밍
+MessagePool.Shared.Prewarm(MessageSize.K1, 100);  // 100개의 1KB 버퍼 미리 할당
+```
+
 #### 선택 고려사항
 
+**빠른 참조: 각 전략을 언제 사용할지**
+
+대부분의 애플리케이션은 이 결정 트리를 따르세요:
+
+1. **기본 선택: MessagePool**
+   - 메시지 크기를 알 수 있거나 전달할 수 있는 모든 시나리오에서 사용
+   - 제로 GC, 자동 반환, 최고의 전체 성능 제공
+   - 수신에는 크기 선행 프로토콜 또는 고정 크기 메시지 필요
+
+2. **크기를 알 수 없을 때: Message**
+   - 메시지 크기를 사전에 결정할 수 없을 때만 사용
+   - 제로 GC이지만 중대형 메시지에서 MessagePool보다 느림
+
+3. **레거시 또는 간단한 코드: ByteArray**
+   - GC 압력이 허용되고 단순성이 중요할 때만 사용
+   - 고처리량 또는 대용량 메시지 시나리오에서는 피해야 함
+
+4. **수동 제어: ArrayPool**
+   - 버퍼 라이프사이클에 대한 명시적 제어가 필요할 때 사용
+   - 수동 Return() 호출 필요
+   - 자동 반환 때문에 일반적으로 MessagePool이 선호됨
+
+5. **고급 제로카피: MessageZeroCopy**
+   - 맞춤형 메모리 관리 시나리오에서 사용
+   - 대부분의 사용 사례는 MessagePool로 더 잘 처리됨
+
+**상세 고려사항**
+
 **메시지 크기 분포**:
-- 작은 메시지(≤512B)의 경우, ArrayPool이 최고의 성능(1-5% 빠름)과 거의 제로 GC 압력 제공
-- 큰 메시지(≥64KB)의 경우, Message가 최고의 성능(16% 빠름)과 제로 GC 압력 제공
+- **작은 메시지 (≤64B)**: ArrayPool/ByteArray가 약간 유리 (~5%) 하지만 콜백 오버헤드가 낮지만 MessagePool의 GC 이점이 이를 압도
+- **중간 메시지 (1KB-64KB)**: MessagePool이 가장 빠름 (ByteArray보다 12% 빠름), 제로 GC
+- **큰 메시지 (≥128KB)**: MessagePool이 압도적 (ByteArray보다 3.4배 빠름), 제로 GC
 - ByteArray는 메시지 크기가 증가함에 따라 기하급수적으로 증가하는 GC 압력 생성
-- ArrayPool과 네이티브 전략은 메시지 크기에 관계없이 제로 GC 압력 유지
+- MessagePool, ArrayPool, Message는 메시지 크기에 관계없이 제로 GC 압력 유지
 
 **GC 민감도**:
-- GC 일시 중지에 민감한 애플리케이션은 ArrayPool, Message 또는 MessageZeroCopy의 이점
-- 드문 메시징이나 일관되게 작은 메시지가 있는 애플리케이션은 ByteArray가 허용 가능할 수 있음
-- 가변 메시지 크기의 고처리량 애플리케이션은 GC 프리 전략의 이점
+- GC 일시 중지에 민감한 애플리케이션은 MessagePool, ArrayPool, Message 또는 MessageZeroCopy 사용해야 함
+- 자동 버퍼 관리를 위해 MessagePool 선호
+- 가변 메시지 크기의 고처리량 애플리케이션은 MessagePool에서 가장 큰 이점
+- ByteArray는 드문 메시징이 있거나 GC 압력이 허용 가능한 애플리케이션에서만 허용
 
 **코드 복잡성**:
-- ByteArray는 자동 메모리 관리로 가장 간단한 구현 제공
-- ArrayPool은 명시적 Rent/Return 호출 및 버퍼 라이프사이클 추적 필요
-- Message는 적당한 복잡도로 네이티브 통합 제공
-- MessageZeroCopy는 언매니지드 메모리 관리 및 프리 콜백 필요
+- ByteArray: 자동 메모리 관리로 가장 간단한 구현
+- **MessagePool: 자동 반환이 있는 간단한 API** - 대부분의 사용 사례에 권장
+- ArrayPool: 명시적 Rent/Return 호출 및 버퍼 라이프사이클 추적 필요
+- Message: 적당한 복잡도로 네이티브 통합
+- MessageZeroCopy: 언매니지드 메모리 관리 및 프리 콜백 필요
 
-**Interop 오버헤드**:
-- 작은 메시지의 경우, 관리 전략(ByteArray, ArrayPool)은 더 낮은 오버헤드 표시
-- 큰 메시지의 경우, 네이티브 전략(Message, MessageZeroCopy)은 관리/언매니지드 복사를 피할 수 있음
-- 성능 교차점은 메시지 크기 및 액세스 패턴에 따라 다름
+**프로토콜 요구사항**:
+- **MessagePool 수신은 메시지 크기를 알아야 함:**
+  - 크기 선행 프로토콜 사용: `Send([size][payload])`
+  - 또는 고정 크기 메시지 사용
+  - 대부분의 실제 프로토콜은 이미 이를 지원
+- 다른 전략은 수신에 이 제약이 없음
 
 **성능 요구사항**:
-- 처리량이 중요하고 메시지가 작을 때(≤512B), ArrayPool이 가장 효과적 (1-5% 빠름, 제로 GC)
-- 처리량이 중요하고 메시지가 클 때(≥64KB), Message가 가장 효과적 (16% 빠름, 제로 GC)
-- 지연 일관성이 중요한 경우, GC 프리 전략(ArrayPool, Message, MessageZeroCopy)이 더 예측 가능한 타이밍 제공
-- ByteArray는 단순성이 가장 중요하고 GC 압력이 허용 가능한 애플리케이션에만 적합
+- **최고의 전체 성능: MessagePool** (크기를 알 수 있을 때)
+  - 1KB 메시지에서 12% 빠르고, 128KB 메시지에서 ByteArray보다 3.4배 빠름
+  - 제로 GC 압력
+  - 자동 버퍼 반환
+- 크기를 알 수 없을 때: Message가 적당한 성능으로 제로 GC 제공
+- ByteArray는 단순성이 가장 중요하고 GC 압력이 허용 가능한 경우에만 적합
 
 ### I/O 스레드
 

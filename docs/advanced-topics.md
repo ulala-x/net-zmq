@@ -158,6 +158,8 @@ Net.Zmq supports multiple memory management strategies for send and receive oper
 
 **MessageZeroCopy**: Allocates unmanaged memory directly (`Marshal.AllocHGlobal`) and transfers ownership to libzmq via a free callback. This provides true zero-copy semantics by avoiding managed memory entirely, but requires careful lifecycle management.
 
+**MessagePool**: A Net.Zmq exclusive feature (not available in cppzmq) that pools and reuses native memory buffers to eliminate GC pressure and enable high-performance messaging. Unlike ArrayPool which requires manual `Return()` calls, MessagePool automatically returns buffers to the pool via ZeroMQ's free callback when transmission completes.
+
 #### Usage Examples
 
 ByteArray approach uses standard .NET arrays:
@@ -236,6 +238,59 @@ using var message = new Message(nativePtr, dataSize, ptr =>
 socket.Send(message);
 ```
 
+MessagePool approach for sending:
+
+```csharp
+using var socket = new Socket(context, SocketType.Push);
+socket.Connect("tcp://localhost:5555");
+
+// Basic usage: Rent buffer of specified size
+var msg = MessagePool.Shared.Rent(1024);
+socket.Send(msg);  // Auto-returned to pool when transmission completes
+
+// Rent with data: Copies data to pooled buffer
+var data = new byte[1024];
+var msg = MessagePool.Shared.Rent(data);
+socket.Send(msg);
+
+// Prewarm pool for predictable performance
+MessagePool.Shared.Prewarm(MessageSize.K1, 500);  // Warm up 500 x 1KB buffers
+```
+
+MessagePool approach for receiving (size-prefixed protocol):
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// Sender side: Prefix message with size
+var payload = new byte[8192];
+socket.Send(BitConverter.GetBytes(payload.Length), SendFlags.SendMore);
+socket.Send(payload);
+
+// Receiver side: Read size first, then receive into pooled buffer
+var sizeBuffer = new byte[4];
+socket.Recv(sizeBuffer);
+int expectedSize = BitConverter.ToInt32(sizeBuffer);
+
+var msg = MessagePool.Shared.Rent(expectedSize);
+socket.Recv(msg, expectedSize);  // Receive with known size
+ProcessMessage(msg.Data);
+```
+
+MessagePool approach for receiving (fixed-size messages):
+
+```csharp
+using var socket = new Socket(context, SocketType.Pull);
+socket.Connect("tcp://localhost:5555");
+
+// When message size is fixed and known
+const int FixedMessageSize = 1024;
+var msg = MessagePool.Shared.Rent(FixedMessageSize);
+socket.Recv(msg, FixedMessageSize);
+ProcessMessage(msg.Data);
+```
+
 #### Performance and GC Characteristics
 
 Benchmarked with Poller mode on ROUTER-to-ROUTER pattern (10,000 messages, Intel Core Ultra 7 265K):
@@ -275,35 +330,183 @@ The transition from minimal to significant GC pressure is clearly visible in the
 
 ArrayPool, Message, and MessageZeroCopy maintain zero GC collections regardless of message size, demonstrating their effectiveness for GC-sensitive applications.
 
+#### MessagePool: Net.Zmq Exclusive Feature
+
+MessagePool is a unique feature in Net.Zmq (not available in cppzmq or other ZeroMQ bindings) that provides pooled native memory buffers for high-performance, GC-free messaging.
+
+**Architecture: Two-Tier Caching System**
+
+MessagePool uses a sophisticated two-tier caching architecture for optimal performance:
+
+- **Tier 1 - Thread-Local Cache**: Each thread maintains a lock-free cache with 8 buffers per bucket, minimizing lock contention
+- **Tier 2 - Shared Pool**: A thread-safe `ConcurrentStack` serves as the global pool when thread-local caches are exhausted
+- **19 Size Buckets**: Buffers range from 16 bytes to 4MB, organized in power-of-2 sizes for efficient allocation
+
+**Key Advantages**
+
+1. **Zero GC Pressure**: Eliminates Gen0/Gen1/Gen2 collections by reusing native memory buffers
+2. **Automatic Return**: Unlike ArrayPool which requires manual `Return()` calls, MessagePool automatically returns buffers via ZeroMQ's free callback when transmission completes
+3. **Perfect ZeroMQ Integration**: Seamlessly integrates with ZeroMQ's zero-copy architecture
+4. **Lock-Free Fast Path**: Thread-local caches provide lock-free access for high-throughput scenarios
+5. **Superior Performance**: 12% faster than ByteArray for 1KB messages, 3.4x faster for 128KB messages
+
+**Performance Comparison**
+
+Benchmarked on PUSH-to-PULL pattern (10,000 messages, Intel Core Ultra 7 265K):
+
+| Message Size | MessagePool | ByteArray | ArrayPool | Speedup vs ByteArray |
+|--------------|-------------|-----------|-----------|---------------------|
+| 64B          | 1.881 ms    | 1.775 ms  | 1.793 ms  | 0.95x (5% slower)   |
+| 1KB          | 5.314 ms    | 6.048 ms  | 5.361 ms  | 1.14x (12% faster)  |
+| 128KB        | 342.125 ms  | 1159.675 ms | 367.083 ms | 3.39x (239% faster) |
+| 256KB        | 708.083 ms  | 2399.208 ms | 719.708 ms | 3.39x (239% faster) |
+
+**GC Collections (10,000 messages)**
+
+| Message Size | MessagePool | ByteArray | ArrayPool |
+|--------------|-------------|-----------|-----------|
+| 64B          | 0 GC        | 10 Gen0   | 0 GC      |
+| 1KB          | 0 GC        | 98 Gen0   | 0 GC      |
+| 128KB        | 0 GC        | 9766 Gen0 + 9765 Gen1 + 7 Gen2 | 0 GC |
+| 256KB        | 0 GC        | 19531 Gen0 + 19530 Gen1 + 13 Gen2 | 0 GC |
+
+**Trade-offs and Constraints**
+
+*Memory Considerations:*
+- Native memory footprint: Pooled buffers reside in native memory, not managed heap
+- Potential memory overhead: Up to `MaxBuffers × BucketSize` native memory per bucket
+- Not subject to GC but counts toward process memory
+
+*Performance Characteristics:*
+- Small messages (64B): Slightly slower than ByteArray (~5%) due to callback overhead
+- Medium messages (1KB-128KB): Significantly faster than ByteArray (12-239%)
+- Comparable to ArrayPool for most sizes, with automatic return as added benefit
+
+*Receive Constraints (Critical):*
+- **Requires knowing message size in advance** for receive operations
+- Must rent appropriately sized buffer before receiving
+- Two common solutions:
+  1. **Size-prefixed protocol**: Send message size in a preceding frame
+  2. **Fixed-size messages**: Use predefined, constant message sizes
+- Not suitable for dynamic-size message reception without protocol support
+
+**When to Use MessagePool**
+
+**Recommended: Use MessagePool whenever possible**
+
+MessagePool should be your default choice for most scenarios due to its zero GC pressure, automatic buffer return, and high performance.
+
+**For Sending:**
+- Always use MessagePool for sending - it provides better performance and zero GC pressure
+- Particularly beneficial for medium to large messages (>1KB)
+- Even for small messages (64B), the 5% overhead is negligible compared to GC benefits
+
+**For Receiving:**
+- Use MessagePool when message size is known:
+  - **Size-prefixed protocols**: Send `[size][payload]` as multipart message
+  - **Fixed-size messages**: Use constant message sizes
+- Fall back to `Message` only when size is unknown and unpredictable
+
+**In practice, size is almost always known:**
+- ZeroMQ multipart messages make size-prefixing trivial: `socket.Send(size, SendFlags.SendMore); socket.Send(payload);`
+- The overhead of sending a 4-byte size prefix is minimal compared to GC savings
+- Most real-world protocols already include message framing or size information
+
+**Alternative: When size is truly unknown**
+- If you cannot know the size beforehand, use `Message` for receiving
+- Note that even ArrayPool benchmarks assume fixed-length messages
+- Reading into a fixed buffer and copying is slower due to copy overhead
+- In practice, this scenario is rare - most protocols support size indication
+
+**Usage Best Practices**
+
+```csharp
+// Recommended: Size-prefixed protocol for variable-size messages
+// Sender
+var payload = GeneratePayload();
+socket.Send(BitConverter.GetBytes(payload.Length), SendFlags.SendMore);
+socket.Send(MessagePool.Shared.Rent(payload));
+
+// Receiver
+var sizeBuffer = new byte[4];
+socket.Recv(sizeBuffer);
+int size = BitConverter.ToInt32(sizeBuffer);
+var msg = MessagePool.Shared.Rent(size);
+socket.Recv(msg, size);
+
+// Recommended: Fixed-size messages
+const int MessageSize = 1024;
+var msg = MessagePool.Shared.Rent(MessageSize);
+socket.Send(msg);
+
+// Optional: Prewarm pool for consistent performance
+MessagePool.Shared.Prewarm(MessageSize.K1, 100);  // Pre-allocate 100 x 1KB buffers
+```
+
 #### Selection Considerations
 
+**Quick Reference: When to Use Each Strategy**
+
+For most applications, follow this decision tree:
+
+1. **Default Choice: MessagePool**
+   - Use for all scenarios where message size is known or can be communicated
+   - Provides zero GC, automatic return, and best overall performance
+   - Requires size-prefixed protocol or fixed-size messages for receiving
+
+2. **When Size is Unknown: Message**
+   - Use only when you cannot determine message size beforehand
+   - Zero GC but slower than MessagePool for medium/large messages
+
+3. **Legacy or Simple Code: ByteArray**
+   - Use only when GC pressure is acceptable and simplicity is critical
+   - Avoid for high-throughput or large message scenarios
+
+4. **Manual Control: ArrayPool**
+   - Use when you need explicit control over buffer lifecycle
+   - Requires manual Return() calls
+   - MessagePool is generally preferred due to automatic return
+
+5. **Advanced Zero-Copy: MessageZeroCopy**
+   - Use for custom memory management scenarios
+   - Most use cases are better served by MessagePool
+
+**Detailed Considerations**
+
 **Message Size Distribution**:
-- For small messages (≤512B), ArrayPool offers best performance (1-5% faster) with near-zero GC pressure
-- For large messages (≥64KB), Message offers best performance (16% faster) with zero GC pressure
+- **Small messages (≤64B)**: ArrayPool/ByteArray have slight edge (~5%) due to lower callback overhead, but MessagePool's GC benefits outweigh this
+- **Medium messages (1KB-64KB)**: MessagePool is fastest (12% faster than ByteArray), with zero GC
+- **Large messages (≥128KB)**: MessagePool dominates (3.4x faster than ByteArray), with zero GC
 - ByteArray generates exponentially increasing GC pressure as message size grows
-- ArrayPool and native strategies maintain zero GC pressure regardless of message size
+- MessagePool, ArrayPool, and Message maintain zero GC pressure regardless of message size
 
 **GC Sensitivity**:
-- Applications sensitive to GC pauses benefit from ArrayPool, Message, or MessageZeroCopy
-- Applications with infrequent messaging or consistently small messages may find ByteArray acceptable
-- High-throughput applications with variable message sizes benefit from GC-free strategies
+- Applications sensitive to GC pauses should use MessagePool, ArrayPool, Message, or MessageZeroCopy
+- MessagePool preferred for automatic buffer management
+- High-throughput applications with variable message sizes benefit most from MessagePool
+- ByteArray only acceptable for applications with infrequent messaging or where GC pressure is tolerable
 
 **Code Complexity**:
-- ByteArray offers the simplest implementation with automatic memory management
-- ArrayPool requires explicit Rent/Return calls and buffer lifecycle tracking
-- Message provides native integration with moderate complexity
-- MessageZeroCopy requires unmanaged memory management and free callbacks
+- ByteArray: Simplest implementation with automatic memory management
+- **MessagePool: Simple API with automatic return** - recommended for most use cases
+- ArrayPool: Requires explicit Rent/Return calls and buffer lifecycle tracking
+- Message: Native integration with moderate complexity
+- MessageZeroCopy: Requires unmanaged memory management and free callbacks
 
-**Interop Overhead**:
-- For small messages, managed strategies (ByteArray, ArrayPool) show lower overhead
-- For large messages, native strategies (Message, MessageZeroCopy) can avoid managed/unmanaged copying
-- The performance crossover depends on message size and access patterns
+**Protocol Requirements**:
+- **MessagePool receive requires knowing message size:**
+  - Use size-prefixed protocol: `Send([size][payload])`
+  - Or use fixed-size messages
+  - Most real-world protocols already support this
+- Other strategies don't have this constraint for receiving
 
 **Performance Requirements**:
-- When throughput is critical and messages are small (≤512B), ArrayPool is most effective (1-5% faster, zero GC)
-- When throughput is critical and messages are large (≥64KB), Message is most effective (16% faster, zero GC)
-- When latency consistency matters, GC-free strategies (ArrayPool, Message, MessageZeroCopy) provide more predictable timing
-- ByteArray is only suitable for applications where simplicity is paramount and GC pressure is acceptable
+- **Best overall performance: MessagePool** (when size is known)
+  - 12% faster for 1KB messages, 3.4x faster for 128KB messages vs ByteArray
+  - Zero GC pressure
+  - Automatic buffer return
+- When size is unknown: Message provides zero GC with moderate performance
+- ByteArray only suitable when simplicity is paramount and GC pressure is acceptable
 
 ### I/O Threads
 
