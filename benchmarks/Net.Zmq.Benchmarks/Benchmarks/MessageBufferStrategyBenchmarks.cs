@@ -5,11 +5,13 @@ using System.Runtime.InteropServices;
 namespace Net.Zmq.Benchmarks.Benchmarks;
 
 /// <summary>
-/// Compares four message buffer management approaches for ZeroMQ send/recv operations:
+/// Compares six message buffer management approaches for ZeroMQ send/recv operations:
 /// 1. ByteArray (Baseline): Allocate new byte[] for each message (max GC pressure)
 /// 2. ArrayPool: Reuse byte[] from ArrayPool.Shared (min GC pressure)
-/// 3. Message: Use Message objects backed by native memory (copy to native)
+/// 3. Message: Use Message objects backed by native memory (allocate native)
 /// 4. MessageZeroCopy: Use Message with zmq_msg_init_data (true zero-copy)
+/// 5. MessagePooled: Send with MessagePool.Shared, receive with new Message
+/// 6. MessagePooled_WithReceivePool: Both send and receive use MessagePool
 ///
 /// Scenario: ROUTER-to-ROUTER multipart messaging (identity + body)
 /// - Sender creates buffers and sends data
@@ -30,8 +32,6 @@ public class MessageBufferStrategyBenchmarks
     [Params(10000)]
     public int MessageCount { get; set; }
 
-    private byte[] _sourceData = null!; // Simulates external input data
-    private nint _sourceNativeData  ; // Simulates external input data
     private byte[] _recvBuffer = null!; // Fixed buffer for direct recv
     private byte[] _identityBuffer = null!; // Buffer for identity frame
 
@@ -42,20 +42,9 @@ public class MessageBufferStrategyBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Initialize test data
-        _sourceNativeData = Marshal.AllocHGlobal((int)MessageSize);
-        unsafe
-        {
-            var sourceSpan = new Span<byte>((void*)_sourceNativeData, (int)MessageSize);
-            sourceSpan.Fill((byte)'A');
-        }
-
-
-
-        _sourceData = new byte[(int)MessageSize];
+        // Initialize buffers
         _recvBuffer = new byte[(int)MessageSize];
         _identityBuffer = new byte[64];
-        Array.Fill(_sourceData, (byte)'A');
 
         // Create ZeroMQ context
         _ctx = new Context();
@@ -77,6 +66,9 @@ public class MessageBufferStrategyBenchmarks
         _router2.Send("hi"u8.ToArray());
         _router1.Recv(_identityBuffer);
         _router1.Recv(_identityBuffer);
+
+        // Prewarm the message pool for benchmarks
+        MessagePool.Shared.Prewarm((Net.Zmq.MessageSize)MessageSize, 100);
     }
 
     [GlobalCleanup]
@@ -86,6 +78,7 @@ public class MessageBufferStrategyBenchmarks
         _router1?.Dispose();
         _router2?.Dispose();
         _ctx.Dispose();
+        MessagePool.Shared.Clear();
     }
 
     private Socket CreateSocket(SocketType type)
@@ -133,7 +126,6 @@ public class MessageBufferStrategyBenchmarks
             _router1.Send(_router2Id, SendFlags.SendMore);
 
             var sendBuffer = new byte[(int)MessageSize];
-            _sourceData.AsSpan(0, (int)MessageSize).CopyTo(sendBuffer);
             _router1.Send(sendBuffer, SendFlags.DontWait);
         }
 
@@ -188,8 +180,7 @@ public class MessageBufferStrategyBenchmarks
             var sendBuffer = ArrayPool<byte>.Shared.Rent((int)MessageSize);
             try
             {
-                _sourceData.AsSpan(0, (int) MessageSize).CopyTo(sendBuffer);
-                _router1.Send(sendBuffer.AsSpan(0,(int) MessageSize), SendFlags.DontWait);
+                _router1.Send(sendBuffer.AsSpan(0, (int)MessageSize), SendFlags.DontWait);
             }
             finally
             {
@@ -231,12 +222,12 @@ public class MessageBufferStrategyBenchmarks
         });
         thread.Start();
 
-        // Sender: create Message + copy data + send
+        // Sender: create Message + send (native allocation)
         for (int i = 0; i < MessageCount; i++)
         {
             _router1.Send(_router2Id, SendFlags.SendMore);
 
-            using var msg = new Message(_sourceData.AsSpan(0, (int)MessageSize));
+            using var msg = new Message((int)MessageSize);
             _router1.Send(msg, SendFlags.DontWait);
         }
 
@@ -282,17 +273,6 @@ public class MessageBufferStrategyBenchmarks
             // Allocate native memory
             nint nativePtr = Marshal.AllocHGlobal((int)MessageSize);
 
-            // Copy source data to native memory
-            unsafe
-            {
-                Buffer.MemoryCopy(
-                    (void*)_sourceNativeData,
-                    (void*)nativePtr,
-                    (int)MessageSize,
-                    (int)MessageSize
-                );
-            }
-
             // Create Message with zero-copy (ZMQ will own this memory)
             using var msg = new Message(nativePtr, (int)MessageSize, ptr =>
             {
@@ -301,6 +281,95 @@ public class MessageBufferStrategyBenchmarks
             });
 
             _router1.Send(msg, SendFlags.DontWait);
+        }
+
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
+    }
+
+    // ========================================
+    // MessagePooled approach: Reuse native memory from pool
+    // ========================================
+    /// <summary>
+    /// MessagePooled approach: Use MessagePool.Shared for send buffers.
+    /// Sender rents Message from pool, receiver uses new Message.
+    /// Expected: Low GC pressure, good performance with native memory reuse.
+    /// </summary>
+    [Benchmark]
+    public void MessagePooled_SendRecv()
+    {
+        var countdown = new CountdownEvent(1);
+        var thread = new Thread(() =>
+        {
+            for (int n = 0; n < MessageCount; n++)
+            {
+                // Receive identity frame (blocking)
+                _router2.Recv(_identityBuffer);
+                // Receive data frame into Message (blocking)
+                using var msg = new Message();
+                _router2.Recv(msg);
+                // Use msg.Data directly (no copy to managed memory)
+                // External consumer would use msg.Data here
+            }
+            countdown.Signal();
+        });
+        thread.Start();
+
+        // Sender: rent from MessagePool + send (automatic return via ZMQ callback)
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+
+            var msg = MessagePool.Shared.Rent((int)MessageSize);
+            _router1.Send(msg, SendFlags.DontWait);
+            // Message automatically returns to pool after ZMQ sends it
+        }
+
+        if (!countdown.Wait(TimeSpan.FromSeconds(30)))
+        {
+            throw new TimeoutException("Benchmark timeout after 30s - receiver may be hung");
+        }
+    }
+
+    // ========================================
+    // MessagePooled with receive pool: Full pooling
+    // ========================================
+    /// <summary>
+    /// MessagePooled with receive pool: Both sender and receiver use MessagePool.
+    /// Sender rents Message from pool, receiver also receives into pooled Message.
+    /// Expected: Minimal GC pressure, best native memory reuse.
+    /// </summary>
+    [Benchmark]
+    public void MessagePooled_SendRecv_WithReceivePool()
+    {
+        var countdown = new CountdownEvent(1);
+        var thread = new Thread(() =>
+        {
+            for (int n = 0; n < MessageCount; n++)
+            {
+                // Receive identity frame (blocking)
+                _router2.Recv(_identityBuffer);
+                // Receive data frame into pooled Message (blocking)
+                var msg = MessagePool.Shared.Rent((int)MessageSize);
+                _router2.Recv(msg, (int)MessageSize);
+                // Use msg.Data directly (no copy to managed memory)
+                // External consumer would use msg.Data here
+                msg.Dispose(); // Returns to pool
+            }
+            countdown.Signal();
+        });
+        thread.Start();
+
+        // Sender: rent from MessagePool + send (automatic return via ZMQ callback)
+        for (int i = 0; i < MessageCount; i++)
+        {
+            _router1.Send(_router2Id, SendFlags.SendMore);
+
+            var msg = MessagePool.Shared.Rent((int)MessageSize);
+            _router1.Send(msg, SendFlags.DontWait);
+            // Message automatically returns to pool after ZMQ sends it
         }
 
         if (!countdown.Wait(TimeSpan.FromSeconds(30)))
