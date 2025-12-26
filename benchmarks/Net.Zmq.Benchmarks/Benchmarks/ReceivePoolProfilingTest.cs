@@ -121,11 +121,11 @@ public class ReceivePoolProfilingTest
     }
 
     /// <summary>
-    /// ReceiveWithPool() - 전체 경로
-    /// = Recv(_recvBufferPtr) + Rent(actualSize) + CopyFromNative + Dispose
+    /// MessagePool.Rent + Recv(message, expectSize) - 전체 경로
+    /// = Rent(size) + Recv(msg, size) + Dispose
     /// </summary>
     [Benchmark]
-    public void ReceiveWithPool_Full()
+    public void MessagePoolRent_Recv_Full()
     {
         var countdown = new CountdownEvent(1);
         var thread = new Thread(() =>
@@ -133,7 +133,8 @@ public class ReceivePoolProfilingTest
             for (int i = 0; i < MessageCount; i++)
             {
                 _router2.Recv(_identityBuffer);
-                using var msg = _router2.ReceiveWithPool();
+                using var msg = MessagePool.Shared.Rent(MessageSize);
+                _router2.Recv(msg, MessageSize);
             }
             countdown.Signal();
         });

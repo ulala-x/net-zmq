@@ -13,8 +13,8 @@ public sealed class Socket : IDisposable
 {
     private readonly ZmqSocketHandle _handle;
     private bool _disposed;
-    private nint _recvBufferPtr = nint.Zero;
-    private const int MaxRecvBufferSize = 4 * 1024 * 1024;  // 4 MB
+    //private nint _recvBufferPtr = nint.Zero;
+    //private const int MaxRecvBufferSize = 4 * 1024 * 1024;  // 4 MB
 
     /// <summary>
     /// Creates a new ZMQ socket with the specified type.
@@ -29,7 +29,7 @@ public sealed class Socket : IDisposable
         var ptr = LibZmq.Socket(context.Handle, (int)socketType);
         ZmqException.ThrowIfNull(ptr);
         _handle = new ZmqSocketHandle(ptr, true);
-        _recvBufferPtr = Marshal.AllocHGlobal(MaxRecvBufferSize);
+        //_recvBufferPtr = Marshal.AllocHGlobal(MaxRecvBufferSize);
     }
 
     internal nint Handle
@@ -405,55 +405,31 @@ public sealed class Socket : IDisposable
         return msg.ToArray();
     }
 
-    /// <summary>
-    /// MessagePool을 사용하여 최적화된 메모리 관리로 메시지를 수신합니다.
-    /// 재사용 수신 버퍼를 사용하여 할당 오버헤드를 최소화합니다.
-    /// </summary>
-    /// <param name="flags">수신 플래그. If DontWait flag is set and no message is available (EAGAIN), returns null instead of throwing.</param>
-    /// <returns>
-    /// 풀링된 Message, or null if DontWait flag was set and no message is available (EAGAIN).
-    /// 메시지는 Send()를 통해 전송 시 ZMQ callback으로 자동 반환됩니다.
-    /// </returns>
-    /// <exception cref="ObjectDisposedException">Socket이 Dispose됨</exception>
-    /// <exception cref="ZmqException">
-    /// Thrown if the operation fails with an error other than EAGAIN.
-    /// For blocking mode (without DontWait flag), EAGAIN also throws an exception as it indicates an abnormal state.
-    /// </exception>
-    /// <example>
-    /// <code>
-    /// // 케이스 1: 수신 후 다른 소켓으로 전송
-    /// using (var msg = socket.ReceiveWithPool())
-    /// {
-    ///     otherSocket.Send(msg);  // ZMQ가 자동 반환
-    /// }
-    ///
-    /// // 케이스 2: DontWait 플래그로 논블로킹 수신
-    /// var msg = socket.ReceiveWithPool(RecvFlags.DontWait);
-    /// if (msg == null)
-    /// {
-    ///     // No message available
-    /// }
-    /// else
-    /// {
-    ///     using (msg)
-    ///     {
-    ///         otherSocket.Send(msg);
-    ///     }
-    /// }
-    /// </code>
-    /// </example>
-    public Message? ReceiveWithPool(RecvFlags flags = RecvFlags.None)
+
+
+    public int Recv(Message message,int expectSize, RecvFlags flags = RecvFlags.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        int actualSize = Recv(_recvBufferPtr, MaxRecvBufferSize, flags);
-        if (actualSize == -1)
-            return null;
+        if (message.BufferSize < expectSize)
+        {
+            throw new ZmqException();
+        }
 
-        var msg = MessagePool.Shared.Rent(actualSize);
-        msg.CopyFromNative(_recvBufferPtr, actualSize);
-        return msg;
+        int actualSize = Recv(message.DataPtr, message.BufferSize, flags);
+
+        if(actualSize == -1)
+            return -1;
+
+        if (actualSize != expectSize)
+            throw new ZmqException();
+
+        // Update actual data size for pooled messages
+        message._actualDataSize = actualSize;
+
+        return actualSize;
     }
+
 
     #endregion
 
@@ -776,11 +752,6 @@ public sealed class Socket : IDisposable
         if (!_disposed)
         {
             _handle.Dispose();
-            if (_recvBufferPtr != nint.Zero)
-            {
-                Marshal.FreeHGlobal(_recvBufferPtr);
-                _recvBufferPtr = nint.Zero;
-            }
             _disposed = true;
         }
     }

@@ -574,9 +574,10 @@ public class MessagePoolTests
         Message? forwardMsg = null;
         await Task.Run(() =>
         {
-            forwardMsg = pull1.ReceiveWithPool();
+            forwardMsg = MessagePool.Shared.Rent(testData.Length);
+            pull1.Recv(forwardMsg, testData.Length);
             forwardMsg.Should().NotBeNull();
-            forwardMsg!._isFromPool.Should().BeTrue("ReceiveWithPool should return pooled message");
+            forwardMsg!._isFromPool.Should().BeTrue("MessagePool.Rent should return pooled message");
         });
 
         await Task.Run(() =>
@@ -1254,12 +1255,13 @@ public class MessagePoolTests
         Message? receivedMsg = null;
         await Task.Run(() =>
         {
-            receivedMsg = pull.ReceiveWithPool();
+            receivedMsg = MessagePool.Shared.Rent(testData.Length);
+            pull.Recv(receivedMsg, testData.Length);
         });
 
         // Assert
         receivedMsg.Should().NotBeNull();
-        receivedMsg!._isFromPool.Should().BeTrue("ReceiveWithPool should return pooled message");
+        receivedMsg!._isFromPool.Should().BeTrue("MessagePool.Rent should return pooled message");
         receivedMsg.Size.Should().Be(testData.Length);
 
         receivedMsg.Dispose();
@@ -1290,7 +1292,8 @@ public class MessagePoolTests
         Message? forwardedMsg = null;
         await Task.Run(() =>
         {
-            forwardedMsg = pull1.ReceiveWithPool();
+            forwardedMsg = MessagePool.Shared.Rent(testData.Length);
+            pull1.Recv(forwardedMsg, testData.Length);
         });
 
         await Task.Run(() =>
@@ -1335,7 +1338,8 @@ public class MessagePoolTests
         var proxyTask = Task.Run(() =>
         {
             // Proxy: 수신 → 전송
-            using var msg = frontend.ReceiveWithPool();
+            using var msg = MessagePool.Shared.Rent(testData.Length);
+            frontend.Recv(msg, testData.Length);
             backend.Send(msg);
         });
 
@@ -1678,13 +1682,13 @@ public class MessagePoolTests
         push.Send(sourceData);
         await Task.Delay(50);
 
-        using var receivedMsg = pull.ReceiveWithPool();
+        using var receivedMsg = MessagePool.Shared.Rent(messageSize);
+        pull.Recv(receivedMsg, messageSize);
 
         // Assert
         receivedMsg.Should().NotBeNull();
         receivedMsg!.Size.Should().Be(messageSize, "actual size should be set correctly");
         receivedMsg._isFromPool.Should().BeTrue();
-        receivedMsg._actualDataSize.Should().Be(messageSize);
 
         // Verify data integrity
         receivedMsg.Data.ToArray().Should().Equal(sourceData);
@@ -1714,7 +1718,8 @@ public class MessagePoolTests
         push.Send(sourceData);
         await Task.Delay(50);
 
-        using var receivedMsg = pull.ReceiveWithPool();
+        using var receivedMsg = MessagePool.Shared.Rent(messageSize);
+        pull.Recv(receivedMsg, messageSize);
 
         // Assert - Should receive correct small size, not MaxRecvBufferSize
         receivedMsg.Should().NotBeNull();
@@ -1728,7 +1733,7 @@ public class MessagePoolTests
     }
 
     [Fact]
-    public async Task ReceiveWithPool_ErrorHandling_ReturnsToPool()
+    public async Task MessagePoolRent_Recv_ErrorHandling_ReturnsToPool()
     {
         // Arrange - Test that Message is returned to pool on error
         var pool = MessagePool.Shared;
@@ -1738,11 +1743,16 @@ public class MessagePoolTests
         var socket = new Socket(ctx, SocketType.Pull);
         socket.Bind("inproc://error-test");
 
-        // Act - Try to receive with DontWait (should return null)
-        var msg = socket.ReceiveWithPool(RecvFlags.DontWait);
+        // Act - Try to receive with DontWait (should return -1)
+        const int testSize = 64;
+        var msg = MessagePool.Shared.Rent(testSize);
+        int result = socket.Recv(msg, testSize, RecvFlags.DontWait);
 
-        // Assert - Message should be null and returned to pool
-        msg.Should().BeNull("no message available");
+        // Assert - Recv should return -1 (no message available)
+        result.Should().Be(-1, "no message available");
+
+        // Dispose message to return to pool
+        msg.Dispose();
 
         var statsAfter = pool.GetStatistics();
         statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers");

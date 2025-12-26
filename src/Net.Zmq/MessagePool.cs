@@ -235,14 +235,18 @@ public sealed class MessagePool
                 msg.ReturnToPool();
                 _pooledMessages[bucketIndex].Push(msg);
                 Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
+#if DEBUG
                 Interlocked.Increment(ref _totalReturns);
+#endif
             }
             else
             {
                 // Pool is full - actually dispose the message
                 msg.DisposePooledMessage();
+#if DEBUG
                 Interlocked.Increment(ref _totalReturns);
                 Interlocked.Increment(ref _poolRejects);
+#endif
             }
         }
     }
@@ -325,8 +329,10 @@ public sealed class MessagePool
             // 크기가 너무 큼 - 풀링하지 않고 일회용 Message 생성
             var dataPtr = Marshal.AllocHGlobal(size);
             var msg = new Message(dataPtr, size, ptr => Marshal.FreeHGlobal(ptr));
+#if DEBUG
             Interlocked.Increment(ref _poolMisses);
             Interlocked.Increment(ref _totalRents);
+#endif
             return msg;
         }
 
@@ -334,16 +340,20 @@ public sealed class MessagePool
         {
             Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
             pooledMsg.PrepareForReuse();
+#if DEBUG
             Interlocked.Increment(ref _poolHits);
             Interlocked.Increment(ref _totalRents);
+#endif
             return pooledMsg;
         }
 
         // 풀에 없으면 새로 생성
         var bucketSize = GetBucketSize(bucketIndex);
         var newMsg = CreatePooledMessage(bucketSize, bucketIndex);
+#if DEBUG
         Interlocked.Increment(ref _poolMisses);
         Interlocked.Increment(ref _totalRents);
+#endif
         return newMsg;
     }
 

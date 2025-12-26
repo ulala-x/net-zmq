@@ -482,8 +482,9 @@ public class MemoryStrategyBenchmarks
                 // First message: blocking wait
                 _router2.Recv(_identityBuffer);
 
-                // Receive: ReceiveWithPool 사용 (Dispose() 시 자동 반환)
-                using var msg = _router2.ReceiveWithPool();
+                // Receive: MessagePool에서 메시지를 빌려서 예상 크기로 수신
+                using var msg = MessagePool.Shared.Rent((int)MessageSize);
+                _router2.Recv(msg, (int)MessageSize);
                 // Use msg.Data here
                 // Dispose() 시 자동 반환
 
@@ -493,7 +494,8 @@ public class MemoryStrategyBenchmarks
                 while (n < MessageCount && _router2.Recv(_identityBuffer, RecvFlags.DontWait) != -1)
                 {
                     // Receive into pooled Message
-                    using var msg2 = _router2.ReceiveWithPool();
+                    using var msg2 = MessagePool.Shared.Rent((int)MessageSize);
+                    _router2.Recv(msg2, (int)MessageSize);
                     // Use msg2.Data here
                     // Dispose() 시 자동 반환
 
