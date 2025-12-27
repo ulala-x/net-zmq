@@ -504,11 +504,17 @@ public sealed class Message : IDisposable
 
     /// <summary>
     /// Pooled 메시지의 실제 데이터 크기를 설정합니다.
+    /// Data Span에 직접 데이터를 쓴 후 실제 크기를 설정할 때 사용합니다.
     /// </summary>
     /// <param name="size">실제 데이터 크기</param>
-    /// <exception cref="ArgumentException">실제 크기가 버퍼 크기를 초과하는 경우</exception>
-    internal void SetActualDataSize(int size)
+    /// <exception cref="ObjectDisposedException">메시지가 이미 Dispose된 경우</exception>
+    /// <exception cref="InvalidOperationException">풀에서 가져온 메시지가 아닌 경우</exception>
+    /// <exception cref="ArgumentException">실제 크기가 버퍼 크기를 초과하거나 음수인 경우</exception>
+    public void SetActualDataSize(int size)
     {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(Message));
+
         if (!_isFromPool)
             throw new InvalidOperationException("SetActualDataSize can only be called on pooled messages");
 

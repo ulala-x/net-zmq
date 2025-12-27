@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
 
     <!-- Version Management -->
-    <VersionPrefix>0.3.1</VersionPrefix>
+    <VersionPrefix>0.4.1</VersionPrefix>
 
     <!-- Package Metadata -->
     <Authors>ulala-x</Authors>
