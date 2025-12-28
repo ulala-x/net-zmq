@@ -1489,25 +1489,28 @@ public class MessagePoolTests
 
         // Arrange
         var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B64, 2); // Limit to 2 buffers
-        pool.Prewarm(MessageSize.B64, 2); // Fill the pool to max
+        pool.SetMaxBuffers(MessageSize.B64, 2); // Shared pool max = 2
+        pool.Prewarm(MessageSize.B64, 2); // Fill shared pool to max
 
         var statsBefore = pool.GetStatistics();
 
-        // Act - Rent 3 messages WITHOUT disposing them first, then dispose all at once
-        // This will cause pool to fill up when returning
-        var msg1 = pool.Rent(64);
-        var msg2 = pool.Rent(64);
-        var msg3 = pool.Rent(64); // This creates a new message since pool only had 2
+        // Thread-local cache size is 8, so we need 11 messages total
+        // to overflow into shared pool
+        // Rent 11 messages: 2 from shared pool + 9 newly created
+        var messages = new Message[11];
+        for (int i = 0; i < 11; i++)
+        {
+            messages[i] = pool.Rent(64);
+        }
 
-        // Now pool is empty (counter = 0). When we dispose all 3, only 2 can return
-        msg1.Dispose();
-        Thread.Sleep(50);
-
-        msg2.Dispose();
-        Thread.Sleep(50);
-
-        msg3.Dispose(); // This should be rejected since pool is already at maxBuffer (2/2)
+        // Dispose all 11 messages:
+        // - First 8 go to thread-local cache
+        // - Next 2 go to shared pool (max = 2)
+        // - Last 1 gets rejected
+        foreach (var msg in messages)
+        {
+            msg.Dispose();
+        }
         Thread.Sleep(100);
 
         // Assert
@@ -1524,35 +1527,35 @@ public class MessagePoolTests
 
         // Arrange
         var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B128, 5);
-        pool.Prewarm(MessageSize.B128, 5); // Pool has 5 messages
+        pool.SetMaxBuffers(MessageSize.B128, 5); // Shared pool max = 5
+        pool.Prewarm(MessageSize.B128, 5); // Shared pool has 5 messages
 
         // Act - Change maxBuffer to 3 (smaller than current pool size of 5)
-        pool.SetMaxBuffers(MessageSize.B128, 3);
+        pool.SetMaxBuffers(MessageSize.B128, 3); // New shared pool max = 3
 
-        // Rent all 5 messages from pool
-        var msg1 = pool.Rent(128);
-        var msg2 = pool.Rent(128);
-        var msg3 = pool.Rent(128);
-        var msg4 = pool.Rent(128);
-        var msg5 = pool.Rent(128);
+        // Thread-local cache size is 8, so we need 12 messages total
+        // to test the new limit
+        // Rent 12 messages: 5 from shared pool + 7 newly created
+        var messages = new Message[12];
+        for (int i = 0; i < 12; i++)
+        {
+            messages[i] = pool.Rent(128);
+        }
 
-        // Now dispose them all - only first 3 should be accepted (new maxBuffer = 3)
-        msg1.Dispose();
-        Thread.Sleep(50);
-        msg2.Dispose();
-        Thread.Sleep(50);
-        msg3.Dispose();
-        Thread.Sleep(50);
-        msg4.Dispose(); // Should be rejected (pool is 3/3)
-        Thread.Sleep(50);
-        msg5.Dispose(); // Should be rejected (pool is 3/3)
+        // Dispose all 12 messages:
+        // - First 8 go to thread-local cache
+        // - Next 3 go to shared pool (new max = 3)
+        // - Last 1 gets rejected
+        foreach (var msg in messages)
+        {
+            msg.Dispose();
+        }
         Thread.Sleep(100);
 
         var stats = pool.GetStatistics();
 
-        // Assert - Should reject messages 4 and 5 because pool limit is now 3
-        stats.PoolRejects.Should().BeGreaterOrEqualTo(2, "dynamic maxBuffer change should apply immediately");
+        // Assert - At least 1 message should be rejected due to new limit
+        stats.PoolRejects.Should().BeGreaterOrEqualTo(1, "dynamic maxBuffer change should apply immediately");
         stats.OutstandingBuffers.Should().Be(0);
     }
 
@@ -1564,25 +1567,33 @@ public class MessagePoolTests
 
         // Arrange
         var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B256, 1);
-        pool.Prewarm(MessageSize.B256, 1); // Fill pool to max
+        pool.SetMaxBuffers(MessageSize.B256, 1); // Shared pool max = 1
+        pool.Prewarm(MessageSize.B256, 1); // Fill shared pool to max
 
         var statsBefore = pool.GetStatistics();
 
-        // Act - Rent 2 messages (pool had 1, so creates 1 new)
-        var msg1 = pool.Rent(256);
-        var msg2 = pool.Rent(256);
+        // Thread-local cache size is 8, so we need to dispose 9+ messages
+        // to overflow into shared pool and trigger rejects
+        // First 8 go to thread-local cache (no reject)
+        // 9th tries to go to shared pool (already has 1 from prewarm)
+        // 10th gets rejected
 
-        // Dispose both - first returns to pool, second should be rejected
-        msg1.Dispose();
-        Thread.Sleep(50);
+        var messages = new Message[10];
+        for (int i = 0; i < 10; i++)
+        {
+            messages[i] = pool.Rent(256);
+        }
 
-        msg2.Dispose(); // This should be rejected since pool is 1/1
+        // Dispose all - first 8 go to thread-local, 9th to shared pool, 10th rejected
+        foreach (var msg in messages)
+        {
+            msg.Dispose();
+        }
         Thread.Sleep(100);
 
         var statsAfter = pool.GetStatistics();
 
-        // Assert - Message should be rejected and memory freed
+        // Assert - At least one message should be rejected
         statsAfter.PoolRejects.Should().BeGreaterThan(statsBefore.PoolRejects, "message should be rejected");
         statsAfter.OutstandingBuffers.Should().Be(0, "no memory leaks");
 
@@ -1596,24 +1607,34 @@ public class MessagePoolTests
         // This test relies on stats tracking which is only available in DEBUG mode
         if (!StatsEnabled) return;
 
-        // Arrange
+        // Arrange - Use a fresh pool to avoid interference from other tests
         var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B512, 10); // Limit to 10 buffers
-        pool.Prewarm(MessageSize.B512, 5);
+        pool.SetMaxBuffers(MessageSize.B512, 5); // Shared pool max = 5 (small to ensure rejects)
 
+        // Thread-local cache size is 8 per thread
+        // Use many threads with many messages to guarantee overflow
         int threadCount = 20;
-        int messagesPerThread = 5;
+        int messagesPerThread = 15; // >> 8, guarantees overflow to shared pool
         var tasks = new List<Task>();
 
         // Act - Multiple threads concurrently renting and disposing
+        // Total messages: 20 threads * 15 messages = 300 messages
+        // Thread-local capacity: 20 threads * 8 cache = 160 messages (max)
+        // Shared pool attempts: 300 - 160 = 140 messages (minimum)
+        // Shared pool capacity: 5
+        // Expected rejects: At least 135 messages (140 - 5)
         for (int t = 0; t < threadCount; t++)
         {
             tasks.Add(Task.Run(() =>
             {
+                var messages = new Message[messagesPerThread];
                 for (int i = 0; i < messagesPerThread; i++)
                 {
-                    var msg = pool.Rent(512);
-                    Thread.Sleep(1); // Small delay to increase contention
+                    messages[i] = pool.Rent(512);
+                }
+                // Dispose all at once to maximize contention on shared pool
+                foreach (var msg in messages)
+                {
                     msg.Dispose();
                 }
             }));
@@ -1626,7 +1647,7 @@ public class MessagePoolTests
         var stats = pool.GetStatistics();
         stats.OutstandingBuffers.Should().Be(0, "no leaked messages");
 
-        // With maxBuffer=10 and 100 total messages, we should see many rejects
+        // With 140+ messages trying to return to shared pool (max=5), we expect many rejects
         stats.PoolRejects.Should().BeGreaterThan(0, "concurrent disposal should respect maxBuffer");
     }
 
@@ -1638,33 +1659,30 @@ public class MessagePoolTests
 
         // Arrange
         var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.K1, 5);
+        pool.SetMaxBuffers(MessageSize.K1, 5); // Shared pool max = 5
 
         // Act - Prewarm to exactly maxBuffer
-        pool.Prewarm(MessageSize.K1, 5); // Pool has 5 messages
+        pool.Prewarm(MessageSize.K1, 5); // Shared pool has 5 messages
 
         var statsAfterPrewarm = pool.GetStatistics();
 
-        // Rent 6 messages (5 from pool + 1 newly created)
-        var msg1 = pool.Rent(1024);
-        var msg2 = pool.Rent(1024);
-        var msg3 = pool.Rent(1024);
-        var msg4 = pool.Rent(1024);
-        var msg5 = pool.Rent(1024);
-        var msg6 = pool.Rent(1024); // New message
+        // Thread-local cache size is 8, shared pool max is 5
+        // Rent 14 messages: 5 from shared pool + 9 newly created
+        // Dispose all 14:
+        //   - First 8 go to thread-local cache
+        //   - Next 5 try to go to shared pool (already has 0, max is 5, so all accepted)
+        //   - Last 1 gets rejected (shared pool is 5/5, thread-local is 8/8)
+        var messages = new Message[14];
+        for (int i = 0; i < 14; i++)
+        {
+            messages[i] = pool.Rent(1024);
+        }
 
-        // Dispose all 6 - only 5 should be accepted
-        msg1.Dispose();
-        Thread.Sleep(50);
-        msg2.Dispose();
-        Thread.Sleep(50);
-        msg3.Dispose();
-        Thread.Sleep(50);
-        msg4.Dispose();
-        Thread.Sleep(50);
-        msg5.Dispose();
-        Thread.Sleep(50);
-        msg6.Dispose(); // This should be rejected (pool is 5/5)
+        // Dispose all
+        foreach (var msg in messages)
+        {
+            msg.Dispose();
+        }
         Thread.Sleep(100);
 
         var statsAfterDispose = pool.GetStatistics();

@@ -265,18 +265,21 @@ public sealed class MessagePool
             }
 
             // Tier 2: Thread-local cache is full, try to return to shared pool
-            // Check if shared pool has room using Interlocked counter (O(1), thread-safe)
-            if (Interlocked.Read(ref _pooledMessageCounts[bucketIndex]) < MaxBuffersPerBucket[bucketIndex])
+            // Use optimistic concurrency with Interlocked.Increment and check the result
+            long newCount = Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);
+
+            if (newCount <= MaxBuffersPerBucket[bucketIndex])
             {
+                // Successfully claimed a slot in the pool
                 _pooledMessages[bucketIndex].Push(msg);
-                Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
 #if DEBUG
                 Interlocked.Increment(ref _totalReturns);
 #endif
             }
             else
             {
-                // Both thread-local cache and shared pool are full - actually dispose the message
+                // Pool is full - decrement the counter back and dispose the message
+                Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
                 msg.DisposePooledMessage();
 #if DEBUG
                 Interlocked.Increment(ref _totalReturns);

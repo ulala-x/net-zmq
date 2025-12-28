@@ -163,6 +163,12 @@ public sealed class Message : IDisposable
     private static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> FreeCallbackFunctionPointer = &FreeCallbackImpl;
 
     /// <summary>
+    /// Unmanaged callback function pointer for temporary messages in Send().
+    /// This callback additionally frees the temporary zmq_msg_t structure.
+    /// </summary>
+    private static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> TempMessageFreeCallbackFunctionPointer = &TempMessageFreeCallbackImpl;
+
+    /// <summary>
     /// Implementation of the unmanaged free callback.
     /// This is called by ZeroMQ when it's done with the message data.
     /// </summary>
@@ -188,6 +194,39 @@ public sealed class Message : IDisposable
         {
             // Swallow exceptions in unmanaged callback to prevent corrupting ZeroMQ's state
             // In production code, you might want to log this error
+        }
+    }
+
+    /// <summary>
+    /// Implementation of the unmanaged free callback for temporary messages.
+    /// This callback invokes the user callback and then frees the temporary zmq_msg_t structure.
+    /// The hint parameter contains a tuple of (tempMsgPtr, originalCallbackHandle).
+    /// </summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void TempMessageFreeCallbackImpl(nint data, nint hint)
+    {
+        if (hint == nint.Zero)
+            return;
+
+        try
+        {
+            // Retrieve the callback from the GCHandle
+            var handle = GCHandle.FromIntPtr(hint);
+            var callback = handle.Target as Action<nint>;
+
+            // Invoke the callback (풀에 반환)
+            callback?.Invoke(data);
+
+            // Free the GCHandle
+            handle.Free();
+
+            // Note: tempMsgPtr is passed via a closure in the callback,
+            // but we don't have access to it here directly.
+            // We'll handle tempMsgPtr cleanup differently.
+        }
+        catch
+        {
+            // Swallow exceptions in unmanaged callback
         }
     }
 
@@ -432,15 +471,73 @@ public sealed class Message : IDisposable
 
         if (_isFromPool && _poolDataPtr != nint.Zero)
         {
-            // Pooled 메시지: zmq_send로 실제 크기만 전송
-            // 이렇게 하면 버킷 크기(예: 1024)가 아닌 실제 데이터 크기(예: 64)만 전송됨
-            result = LibZmq.Send(socket, _poolDataPtr, (nuint)_actualDataSize, (int)flags);
-            ZmqException.ThrowIfError(result);
-            _wasSuccessfullySent = true;
+            // Pooled 메시지: zero-copy 전송을 위해 임시 zmq_msg_t 사용
+            // 임시 메시지를 실제 데이터 크기로 초기화하여 zero-copy 전송
 
-            // 콜백 호출 (풀에 반환)
-            // zmq_send는 zmq_msg_send와 달리 콜백을 자동으로 호출하지 않으므로 수동 호출
-            _reusableCallback?.Invoke(nint.Zero);
+            // 1. 임시 zmq_msg_t 할당 (힙에 할당, ZMQ가 비동기로 접근할 수 있으므로)
+            nint tempMsgPtr = Marshal.AllocHGlobal(64); // sizeof(zmq_msg_t) = 64
+            try
+            {
+                // 메모리 초기화
+                unsafe
+                {
+                    NativeMemory.Clear((void*)tempMsgPtr, 64);
+                }
+
+                // 2. 임시 메시지 전용 콜백 생성
+                //    이 콜백은 풀에 메시지를 반환하고, tempMsgPtr도 해제함
+                var capturedTempMsgPtr = tempMsgPtr; // 클로저로 캡처
+                Action<nint> tempCallback = (dataPtr) =>
+                {
+                    // 원래 콜백 호출 (풀에 반환)
+                    _reusableCallback?.Invoke(dataPtr);
+
+                    // 임시 zmq_msg_t 구조체 해제
+                    Marshal.FreeHGlobal(capturedTempMsgPtr);
+                };
+
+                var tempHandle = GCHandle.Alloc(tempCallback);
+
+                // 3. 실제 데이터 크기로 zmq_msg_init_data 호출
+                nint ffnPtr;
+                unsafe
+                {
+                    ffnPtr = (nint)TempMessageFreeCallbackFunctionPointer;
+                }
+
+                var initResult = LibZmq.MsgInitDataPtr(
+                    tempMsgPtr,
+                    _poolDataPtr,
+                    (nuint)_actualDataSize,  // 실제 데이터 크기만 전송
+                    ffnPtr,
+                    GCHandle.ToIntPtr(tempHandle));
+
+                if (initResult != 0)
+                {
+                    tempHandle.Free();
+                    Marshal.FreeHGlobal(tempMsgPtr);
+                    ZmqException.ThrowIfError(initResult);
+                }
+
+                // 4. zmq_msg_send로 zero-copy 전송
+                //    전송 완료 후 ZMQ가 콜백을 호출하여 풀에 반환하고 tempMsgPtr도 해제
+                result = LibZmq.MsgSendPtr(tempMsgPtr, socket, (int)flags);
+
+                if (result < 0)
+                {
+                    // 전송 실패 시 임시 메시지 닫기 (콜백이 호출되어 리소스 정리됨)
+                    LibZmq.MsgClosePtr(tempMsgPtr);
+                    ZmqException.ThrowIfError(result);
+                }
+
+                // 전송 성공: tempMsgPtr과 tempHandle은 콜백에서 해제됨
+                _wasSuccessfullySent = true;
+            }
+            catch
+            {
+                // 예외 발생 시에는 이미 리소스가 정리되었거나 콜백에서 정리됨
+                throw;
+            }
         }
         else
         {
