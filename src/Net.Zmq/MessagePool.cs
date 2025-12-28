@@ -134,6 +134,12 @@ public sealed class MessagePool
     private long _poolMisses;
 
     /// <summary>
+    /// Gets or sets whether to collect pool statistics.
+    /// Default is false for performance. Enable for testing or monitoring.
+    /// </summary>
+    public bool EnableStatistics { get; set; } = false;
+
+    /// <summary>
     /// Initializes a new instance of MessagePool.
     /// </summary>
     public MessagePool()
@@ -161,7 +167,7 @@ public sealed class MessagePool
     /// Unmanaged callback function pointer for zmq_msg_init_data.
     /// Uses UnmanagedCallersOnly for modern .NET P/Invoke.
     /// </summary>
-    private static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> FreeCallbackFunctionPointer = &FreeCallbackImpl;
+    internal static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> FreeCallbackFunctionPointer = &FreeCallbackImpl;
 
     /// <summary>
     /// ZeroMQ free callback 구현.
@@ -257,34 +263,30 @@ public sealed class MessagePool
                 {
                     bucket.cache[bucket.count] = msg;
                     bucket.count++;
-#if DEBUG
-                    Interlocked.Increment(ref _totalReturns);
-#endif
+                    if (EnableStatistics)
+                        Interlocked.Increment(ref _totalReturns);
                     return;
                 }
             }
 
             // Tier 2: Thread-local cache is full, try to return to shared pool
-            // Use optimistic concurrency with Interlocked.Increment and check the result
-            long newCount = Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);
-
-            if (newCount <= MaxBuffersPerBucket[bucketIndex])
+            // Check if shared pool has room using Interlocked counter (O(1), thread-safe)
+            if (Interlocked.Read(ref _pooledMessageCounts[bucketIndex]) < MaxBuffersPerBucket[bucketIndex])
             {
-                // Successfully claimed a slot in the pool
                 _pooledMessages[bucketIndex].Push(msg);
-#if DEBUG
-                Interlocked.Increment(ref _totalReturns);
-#endif
+                Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
+                if (EnableStatistics)
+                    Interlocked.Increment(ref _totalReturns);
             }
             else
             {
-                // Pool is full - decrement the counter back and dispose the message
-                Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
+                // Both thread-local cache and shared pool are full - actually dispose the message
                 msg.DisposePooledMessage();
-#if DEBUG
-                Interlocked.Increment(ref _totalReturns);
-                Interlocked.Increment(ref _poolRejects);
-#endif
+                if (EnableStatistics)
+                {
+                    Interlocked.Increment(ref _totalReturns);
+                    Interlocked.Increment(ref _poolRejects);
+                }
             }
         }
     }
@@ -334,11 +336,8 @@ public sealed class MessagePool
             }
         }
 
-        // 3. 실제 데이터 크기 설정
-        if (msg._isFromPool)
-        {
-            msg.SetActualDataSize(actualSize);
-        }
+        // 3. zmq_msg_t 재초기화 및 실제 데이터 크기 설정
+        msg.ReinitializeZmqMsg(actualSize);
 
         return msg;
     }
@@ -367,10 +366,11 @@ public sealed class MessagePool
             // 크기가 너무 큼 - 풀링하지 않고 일회용 Message 생성
             var dataPtr = Marshal.AllocHGlobal(size);
             var msg = new Message(dataPtr, size, ptr => Marshal.FreeHGlobal(ptr));
-#if DEBUG
-            Interlocked.Increment(ref _poolMisses);
-            Interlocked.Increment(ref _totalRents);
-#endif
+            if (EnableStatistics)
+            {
+                Interlocked.Increment(ref _poolMisses);
+                Interlocked.Increment(ref _totalRents);
+            }
             return msg;
         }
 
@@ -385,10 +385,11 @@ public sealed class MessagePool
                 var msg = bucket.cache[bucket.count]!;
                 bucket.cache[bucket.count] = null;
                 msg.PrepareForReuse();
-#if DEBUG
-                Interlocked.Increment(ref _poolHits);
-                Interlocked.Increment(ref _totalRents);
-#endif
+                if (EnableStatistics)
+                {
+                    Interlocked.Increment(ref _poolHits);
+                    Interlocked.Increment(ref _totalRents);
+                }
                 return msg;
             }
         }
@@ -398,20 +399,22 @@ public sealed class MessagePool
         {
             Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
             pooledMsg.PrepareForReuse();
-#if DEBUG
-            Interlocked.Increment(ref _poolHits);
-            Interlocked.Increment(ref _totalRents);
-#endif
+            if (EnableStatistics)
+            {
+                Interlocked.Increment(ref _poolHits);
+                Interlocked.Increment(ref _totalRents);
+            }
             return pooledMsg;
         }
 
         // 풀에 없으면 새로 생성
         var bucketSize = GetBucketSize(bucketIndex);
         var newMsg = CreatePooledMessage(bucketSize, bucketIndex);
-#if DEBUG
-        Interlocked.Increment(ref _poolMisses);
-        Interlocked.Increment(ref _totalRents);
-#endif
+        if (EnableStatistics)
+        {
+            Interlocked.Increment(ref _poolMisses);
+            Interlocked.Increment(ref _totalRents);
+        }
         return newMsg;
     }
 

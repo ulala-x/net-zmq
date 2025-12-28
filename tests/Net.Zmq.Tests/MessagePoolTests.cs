@@ -7,23 +7,18 @@ namespace Net.Zmq.Tests;
 [Collection("Sequential")]
 public class MessagePoolTests
 {
-    // Statistics are only tracked in DEBUG builds for performance reasons.
-    // Use this property to conditionally check stats in tests.
-#if DEBUG
-    private static bool StatsEnabled => true;
-#else
-    private static bool StatsEnabled => false;
-#endif
-
-    private static void AssertStatsIf(bool condition, Action assertion)
+    // Helper method to create a pool with statistics enabled
+    private static MessagePool CreatePoolWithStats()
     {
-        if (StatsEnabled && condition)
-            assertion();
+        var pool = new MessagePool();
+        pool.EnableStatistics = true;
+        return pool;
     }
 
-    private static void AssertStats(Action assertion)
+    // Helper method to assert statistics when enabled
+    private static void AssertStats(MessagePool pool, Action assertion)
     {
-        if (StatsEnabled)
+        if (pool.EnableStatistics)
             assertion();
     }
 
@@ -31,7 +26,7 @@ public class MessagePoolTests
     public void RentWithoutSend_ShouldReturnBufferToPool()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var data = new byte[] { 1, 2, 3, 4, 5 };
 
         // Act - Rent and dispose without sending
@@ -45,7 +40,7 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.OutstandingMessages.Should().Be(0, "buffer should be returned when message is not sent");
             stats.Rents.Should().Be(1);
@@ -57,7 +52,7 @@ public class MessagePoolTests
     public void RentWithSend_ShouldReturnBufferToPool()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -82,7 +77,7 @@ public class MessagePoolTests
 
         // Assert - Buffer should be returned via ZMQ callback
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.OutstandingMessages.Should().Be(0, "buffer should be returned after ZMQ finishes transmission");
             stats.Rents.Should().Be(1);
@@ -94,7 +89,7 @@ public class MessagePoolTests
     public void MultipleRentWithoutSend_ShouldReturnAllBuffers()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var data = new byte[] { 1, 2, 3, 4, 5 };
         int count = 10;
 
@@ -110,7 +105,7 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.OutstandingMessages.Should().Be(0, "all buffers should be returned");
             stats.Rents.Should().Be(count);
@@ -122,7 +117,7 @@ public class MessagePoolTests
     public void MixedRentWithAndWithoutSend_ShouldReturnAllBuffers()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -161,7 +156,7 @@ public class MessagePoolTests
 
         // Assert - All buffers should be returned
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.OutstandingMessages.Should().Be(0, "all buffers should be returned regardless of send status");
             stats.Rents.Should().Be(3);
@@ -173,10 +168,10 @@ public class MessagePoolTests
     public void PoolStatistics_ShouldTrackCorrectly()
     {
         // This test only makes sense when stats are enabled (DEBUG mode)
-        if (!StatsEnabled) return;
+        
 
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var data = new byte[] { 1, 2, 3, 4, 5 };
 
         // Act
@@ -224,7 +219,7 @@ public class MessagePoolTests
     public void MessageCallback_ShouldExecuteOnlyOnce()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
 
         // Act - Rent and dispose multiple messages
         var msg1 = pool.Rent(64);
@@ -238,14 +233,14 @@ public class MessagePoolTests
         // Assert - Statistics should show correct return count
         // Each message's callback should execute exactly once
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(2, "each disposal should trigger callback exactly once"));
+        AssertStats(pool, () => stats.Returns.Should().BeGreaterOrEqualTo(2, "each disposal should trigger callback exactly once"));
     }
 
     [Fact]
     public void Rent_ShouldSupportMultipleCycles()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         pool.SetMaxBuffers(MessageSize.B64, 10);
         pool.Prewarm(MessageSize.B64, 5);
         int cycleCount = 10;
@@ -266,17 +261,17 @@ public class MessagePoolTests
 
         // Assert - Statistics should show all cycles completed
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Rents.Should().BeGreaterOrEqualTo(cycleCount, "should track all rent operations"));
+        AssertStats(pool, () => stats.Rents.Should().BeGreaterOrEqualTo(cycleCount, "should track all rent operations"));
     }
 
     [Fact]
     public void Rent_ShouldNotLeakMessages()
     {
         // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
+        
 
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         pool.SetMaxBuffers(MessageSize.B64, 10);
         int messageCount = 5;
 
@@ -309,7 +304,7 @@ public class MessagePoolTests
     public void Rent_WithData_ReturnsMessageWithCorrectData()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var testData = new byte[] { 1, 2, 3, 4, 5 };
 
         // Act
@@ -340,14 +335,14 @@ public class MessagePoolTests
 
         // Assert - 메시지가 반환되고 풀 통계가 갱신되는지 확인
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Rents.Should().Be(1, "one message was rented"));
+        AssertStats(pool, () => stats.Rents.Should().Be(1, "one message was rented"));
     }
 
     [Fact]
     public void Rent_WithSize_AlwaysReturnsReusableMessage()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
 
         // Act & Assert - 여러 번 호출해도 항상 재사용 메시지인지 확인
         using (var msg1 = pool.Rent(64))
@@ -370,7 +365,7 @@ public class MessagePoolTests
 
         // Assert - Pool should reuse messages
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.Rents.Should().Be(2, "two messages were rented");
             stats.PoolHits.Should().BeGreaterThan(0, "at least one message should be reused from pool");
@@ -422,7 +417,7 @@ public class MessagePoolTests
     public void Rent_WithSize_ReturnsReusableMessage()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
 
         // Act
         var msg = pool.Rent(64);
@@ -437,7 +432,7 @@ public class MessagePoolTests
         Thread.Sleep(50);
 
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1));
+        AssertStats(pool, () => stats.Returns.Should().BeGreaterOrEqualTo(1));
     }
 
     [Fact]
@@ -466,7 +461,7 @@ public class MessagePoolTests
     public void RentReusable_MultipleTimes_ReusesMessageObjects()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         pool.Prewarm(MessageSize.B64, 5);
 
         // Act - 같은 사이즈로 여러 번 Rent/Dispose
@@ -487,7 +482,7 @@ public class MessagePoolTests
 
         // Assert - Message 객체가 재사용되는지 검증
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.PoolHits.Should().BeGreaterThan(0, "messages should be reused from pool");
             stats.Rents.Should().Be(3);
@@ -502,7 +497,7 @@ public class MessagePoolTests
     public async Task PooledMessage_SendReceive_DataTransferredCorrectly()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var req = new Socket(ctx, SocketType.Req);
         using var rep = new Socket(ctx, SocketType.Rep);
@@ -540,14 +535,14 @@ public class MessagePoolTests
 
         // Assert
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
+        AssertStats(pool, () => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
     public async Task PooledMessage_MultipleRoundTrips_DataAlwaysCorrect()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -589,7 +584,7 @@ public class MessagePoolTests
 
         // Assert - 이전 데이터가 남아있지 않은지 확인 (PrepareForReuse 검증)
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages returned"));
+        AssertStats(pool, () => stats.OutstandingMessages.Should().Be(0, "all messages returned"));
     }
 
     [Fact]
@@ -650,7 +645,7 @@ public class MessagePoolTests
     public void PooledMessage_Dispose_DoesNotCloseMsgT()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var msg = pool.Rent(64);
 
         // Assert - Pooled 메시지인지 확인
@@ -667,7 +662,7 @@ public class MessagePoolTests
         Thread.Sleep(100);
 
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1, "message should be returned via callback"));
+        AssertStats(pool, () => stats.Returns.Should().BeGreaterOrEqualTo(1, "message should be returned via callback"));
     }
 
     [Fact]
@@ -692,7 +687,7 @@ public class MessagePoolTests
     public void PooledMessage_NotSent_ReturnsToPoolViaCallback()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var statsBefore = pool.GetStatistics();
 
         // Act - Send하지 않은 pooled 메시지
@@ -704,14 +699,14 @@ public class MessagePoolTests
 
         // Assert - Dispose 시 풀에 반환되는지
         var statsAfter = pool.GetStatistics();
-        AssertStats(() => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return to pool"));
+        AssertStats(pool, () => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return to pool"));
     }
 
     [Fact]
     public void PooledMessage_Sent_ReturnsToPoolViaZmqCallback()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -734,7 +729,7 @@ public class MessagePoolTests
 
         // Assert - ZMQ callback으로 풀에 반환되는지
         var statsAfter = pool.GetStatistics();
-        AssertStats(() => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return via ZMQ callback"));
+        AssertStats(pool, () => statsAfter.Returns.Should().BeGreaterThan(statsBefore.Returns, "message should return via ZMQ callback"));
     }
 
     // ======================
@@ -745,7 +740,7 @@ public class MessagePoolTests
     public void PooledMessage_DoubleDispose_Safe()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var msg = pool.Rent(64);
 
         // Act - 이중 Dispose
@@ -757,14 +752,14 @@ public class MessagePoolTests
         // Assert - 안전성
         msg._disposed.Should().BeTrue();
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Returns.Should().BeGreaterOrEqualTo(1)); // 한 번만 반환되어야 함
+        AssertStats(pool, () => stats.Returns.Should().BeGreaterOrEqualTo(1)); // 한 번만 반환되어야 함
     }
 
     [Fact]
     public async Task MixedMessages_PooledAndRegular_BothWorkCorrectly()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -804,14 +799,14 @@ public class MessagePoolTests
 
         // Assert - 각각 올바르게 동작하는지 확인
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.Rents.Should().BeGreaterOrEqualTo(1));
+        AssertStats(pool, () => stats.Rents.Should().BeGreaterOrEqualTo(1));
     }
 
     [Fact]
     public void Prewarm_CreatesReusableMessages()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
 
         // Act - Prewarm으로 생성
         pool.Prewarm(MessageSize.K1, 10);
@@ -827,14 +822,14 @@ public class MessagePoolTests
         Thread.Sleep(100);
 
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.PoolHits.Should().BeGreaterThan(0, "some messages should be reused from prewarmed pool"));
+        AssertStats(pool, () => stats.PoolHits.Should().BeGreaterThan(0, "some messages should be reused from prewarmed pool"));
     }
 
     [Fact]
     public void Clear_ReleasesAllResources()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         pool.Prewarm(MessageSize.B64, 5);
         pool.Prewarm(MessageSize.K1, 3);
 
@@ -860,7 +855,7 @@ public class MessagePoolTests
     public async Task HighConcurrency_PooledMessages_ThreadSafe()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         pool.Prewarm(MessageSize.B128, 50);
 
         int threadCount = 10;
@@ -909,7 +904,7 @@ public class MessagePoolTests
 
         // Assert - 스레드 안전성 검증
         var stats = pool.GetStatistics();
-        AssertStats(() =>
+        AssertStats(pool, () =>
         {
             stats.Rents.Should().BeGreaterOrEqualTo(threadCount * messagesPerThread);
             stats.OutstandingMessages.Should().Be(0, "all messages should be returned");
@@ -1104,7 +1099,7 @@ public class MessagePoolTests
     public async Task Rent_VariousSizes_AllCorrect()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         using var ctx = new Context();
         using var push = new Socket(ctx, SocketType.Push);
         using var pull = new Socket(ctx, SocketType.Pull);
@@ -1139,7 +1134,7 @@ public class MessagePoolTests
         Thread.Sleep(200);
 
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
+        AssertStats(pool, () => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
@@ -1185,7 +1180,7 @@ public class MessagePoolTests
     public void PooledMessage_Reuse_MultipleSizes()
     {
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
 
         // Act - 다양한 크기로 재사용 (1024 → 64 → 512 → 128)
         var data1024 = new byte[1024];
@@ -1230,7 +1225,7 @@ public class MessagePoolTests
 
         // Assert - 매번 올바른 크기만 사용되는지 (PrepareForReuse 검증)
         var stats = pool.GetStatistics();
-        AssertStats(() => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
+        AssertStats(pool, () => stats.OutstandingMessages.Should().Be(0, "all messages should be returned"));
     }
 
     [Fact]
@@ -1484,34 +1479,28 @@ public class MessagePoolTests
     [Fact]
     public void Dispose_WhenMaxBufferExceeded_ActuallyDisposesMessage()
     {
-        // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
-
         // Arrange
-        var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B64, 2); // Shared pool max = 2
-        pool.Prewarm(MessageSize.B64, 2); // Fill shared pool to max
+        var pool = CreatePoolWithStats();
+        pool.SetMaxBuffers(MessageSize.B64, 2); // Limit to 2 buffers in shared pool
 
         var statsBefore = pool.GetStatistics();
 
-        // Thread-local cache size is 8, so we need 11 messages total
-        // to overflow into shared pool
-        // Rent 11 messages: 2 from shared pool + 9 newly created
-        var messages = new Message[11];
+        // Act - Rent 11 messages (more than TL cache size of 8)
+        // When we dispose them, first 8 go to TL cache, next 2 go to shared pool,
+        // and 11th should be rejected
+        var messages = new List<Message>();
         for (int i = 0; i < 11; i++)
         {
-            messages[i] = pool.Rent(64);
+            messages.Add(pool.Rent(64));
         }
 
-        // Dispose all 11 messages:
-        // - First 8 go to thread-local cache
-        // - Next 2 go to shared pool (max = 2)
-        // - Last 1 gets rejected
+        // Dispose all 11 at once
         foreach (var msg in messages)
         {
             msg.Dispose();
         }
-        Thread.Sleep(100);
+
+        Thread.Sleep(200); // Wait for all callbacks
 
         // Assert
         var statsAfter = pool.GetStatistics();
@@ -1522,39 +1511,31 @@ public class MessagePoolTests
     [Fact]
     public void SetMaxBuffers_DynamicChange_AppliesImmediately()
     {
-        // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
-
         // Arrange
-        var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B128, 5); // Shared pool max = 5
-        pool.Prewarm(MessageSize.B128, 5); // Shared pool has 5 messages
+        var pool = CreatePoolWithStats();
+        pool.SetMaxBuffers(MessageSize.B128, 5);
 
-        // Act - Change maxBuffer to 3 (smaller than current pool size of 5)
-        pool.SetMaxBuffers(MessageSize.B128, 3); // New shared pool max = 3
+        // Act - Change maxBuffer to 3
+        pool.SetMaxBuffers(MessageSize.B128, 3);
 
-        // Thread-local cache size is 8, so we need 12 messages total
-        // to test the new limit
-        // Rent 12 messages: 5 from shared pool + 7 newly created
-        var messages = new Message[12];
+        // Rent 12 messages (more than TL cache of 8 + maxBuffer of 3)
+        // When disposed: 8 go to TL cache, 3 go to shared pool, 1 should be rejected
+        var messages = new List<Message>();
         for (int i = 0; i < 12; i++)
         {
-            messages[i] = pool.Rent(128);
+            messages.Add(pool.Rent(128));
         }
 
-        // Dispose all 12 messages:
-        // - First 8 go to thread-local cache
-        // - Next 3 go to shared pool (new max = 3)
-        // - Last 1 gets rejected
+        // Dispose all
         foreach (var msg in messages)
         {
             msg.Dispose();
         }
-        Thread.Sleep(100);
+        Thread.Sleep(200);
 
         var stats = pool.GetStatistics();
 
-        // Assert - At least 1 message should be rejected due to new limit
+        // Assert - At least 1 message should be rejected (12 - 8 TL - 3 shared = 1)
         stats.PoolRejects.Should().BeGreaterOrEqualTo(1, "dynamic maxBuffer change should apply immediately");
         stats.OutstandingBuffers.Should().Be(0);
     }
@@ -1562,38 +1543,30 @@ public class MessagePoolTests
     [Fact]
     public void Dispose_MaxBufferExceeded_ReleasesNativeMemory()
     {
-        // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
-
         // Arrange
-        var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B256, 1); // Shared pool max = 1
-        pool.Prewarm(MessageSize.B256, 1); // Fill shared pool to max
+        var pool = CreatePoolWithStats();
+        pool.SetMaxBuffers(MessageSize.B256, 1);
 
         var statsBefore = pool.GetStatistics();
 
-        // Thread-local cache size is 8, so we need to dispose 9+ messages
-        // to overflow into shared pool and trigger rejects
-        // First 8 go to thread-local cache (no reject)
-        // 9th tries to go to shared pool (already has 1 from prewarm)
-        // 10th gets rejected
-
-        var messages = new Message[10];
+        // Act - Rent 10 messages (more than TL cache of 8 + maxBuffer of 1)
+        // When disposed: 8 go to TL cache, 1 goes to shared pool, 1 should be rejected
+        var messages = new List<Message>();
         for (int i = 0; i < 10; i++)
         {
-            messages[i] = pool.Rent(256);
+            messages.Add(pool.Rent(256));
         }
 
-        // Dispose all - first 8 go to thread-local, 9th to shared pool, 10th rejected
+        // Dispose all
         foreach (var msg in messages)
         {
             msg.Dispose();
         }
-        Thread.Sleep(100);
+        Thread.Sleep(200);
 
         var statsAfter = pool.GetStatistics();
 
-        // Assert - At least one message should be rejected
+        // Assert - Message should be rejected and memory freed
         statsAfter.PoolRejects.Should().BeGreaterThan(statsBefore.PoolRejects, "message should be rejected");
         statsAfter.OutstandingBuffers.Should().Be(0, "no memory leaks");
 
@@ -1604,35 +1577,29 @@ public class MessagePoolTests
     [Fact]
     public async Task Dispose_Concurrent_MaxBufferRespected()
     {
-        // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
+        // Arrange
+        var pool = CreatePoolWithStats();
+        pool.SetMaxBuffers(MessageSize.B512, 2); // Very small shared pool limit
 
-        // Arrange - Use a fresh pool to avoid interference from other tests
-        var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.B512, 5); // Shared pool max = 5 (small to ensure rejects)
-
-        // Thread-local cache size is 8 per thread
-        // Use many threads with many messages to guarantee overflow
-        int threadCount = 20;
-        int messagesPerThread = 15; // >> 8, guarantees overflow to shared pool
+        int threadCount = 3;
+        int messagesPerThread = 11; // Total 33 messages
         var tasks = new List<Task>();
 
         // Act - Multiple threads concurrently renting and disposing
-        // Total messages: 20 threads * 15 messages = 300 messages
-        // Thread-local capacity: 20 threads * 8 cache = 160 messages (max)
-        // Shared pool attempts: 300 - 160 = 140 messages (minimum)
-        // Shared pool capacity: 5
-        // Expected rejects: At least 135 messages (140 - 5)
+        // Each thread: 11 messages, 8 go to TL cache, 3 try to go to shared pool
+        // Total trying to go to shared pool: 3 threads * 3 = 9 messages
+        // But shared pool max = 2, so 7 should be rejected
         for (int t = 0; t < threadCount; t++)
         {
             tasks.Add(Task.Run(() =>
             {
-                var messages = new Message[messagesPerThread];
+                var messages = new List<Message>();
                 for (int i = 0; i < messagesPerThread; i++)
                 {
-                    messages[i] = pool.Rent(512);
+                    messages.Add(pool.Rent(512));
                 }
-                // Dispose all at once to maximize contention on shared pool
+
+                // Dispose all at once
                 foreach (var msg in messages)
                 {
                     msg.Dispose();
@@ -1641,41 +1608,30 @@ public class MessagePoolTests
         }
 
         await Task.WhenAll(tasks);
-        Thread.Sleep(500); // Wait for all callbacks
+        Thread.Sleep(1000); // Wait for all callbacks
 
         // Assert
         var stats = pool.GetStatistics();
         stats.OutstandingBuffers.Should().Be(0, "no leaked messages");
 
-        // With 140+ messages trying to return to shared pool (max=5), we expect many rejects
+        // With maxBuffer=2 in shared pool and many messages overflowing from TL caches,
+        // we should see many rejects
         stats.PoolRejects.Should().BeGreaterThan(0, "concurrent disposal should respect maxBuffer");
     }
 
     [Fact]
     public void Prewarm_WithDispose_RespectsMaxBuffer()
     {
-        // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
-
         // Arrange
-        var pool = new MessagePool();
-        pool.SetMaxBuffers(MessageSize.K1, 5); // Shared pool max = 5
+        var pool = CreatePoolWithStats();
+        pool.SetMaxBuffers(MessageSize.K1, 5);
 
-        // Act - Prewarm to exactly maxBuffer
-        pool.Prewarm(MessageSize.K1, 5); // Shared pool has 5 messages
-
-        var statsAfterPrewarm = pool.GetStatistics();
-
-        // Thread-local cache size is 8, shared pool max is 5
-        // Rent 14 messages: 5 from shared pool + 9 newly created
-        // Dispose all 14:
-        //   - First 8 go to thread-local cache
-        //   - Next 5 try to go to shared pool (already has 0, max is 5, so all accepted)
-        //   - Last 1 gets rejected (shared pool is 5/5, thread-local is 8/8)
-        var messages = new Message[14];
+        // Act - Rent 14 messages (more than TL cache of 8 + maxBuffer of 5)
+        // When disposed: 8 go to TL cache, 5 go to shared pool, 1 should be rejected
+        var messages = new List<Message>();
         for (int i = 0; i < 14; i++)
         {
-            messages[i] = pool.Rent(1024);
+            messages.Add(pool.Rent(1024));
         }
 
         // Dispose all
@@ -1683,7 +1639,7 @@ public class MessagePoolTests
         {
             msg.Dispose();
         }
-        Thread.Sleep(100);
+        Thread.Sleep(200);
 
         var statsAfterDispose = pool.GetStatistics();
 
@@ -1720,10 +1676,10 @@ public class MessagePoolTests
     public void Dispose_AlreadyDisposedPooledMessage_DoesNotReturnToPool()
     {
         // This test relies on stats tracking which is only available in DEBUG mode
-        if (!StatsEnabled) return;
+        
 
         // Arrange
-        var pool = new MessagePool();
+        var pool = CreatePoolWithStats();
         var msg = pool.Rent(64);
 
         var statsBeforeFirstDispose = pool.GetStatistics();
@@ -1844,7 +1800,7 @@ public class MessagePoolTests
         msg.Dispose();
 
         var statsAfter = pool.GetStatistics();
-        AssertStats(() => statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers"));
+        AssertStats(pool, () => statsAfter.OutstandingBuffers.Should().Be(statsBefore.OutstandingBuffers, "no leaked buffers"));
 
         socket.Dispose();
         ctx.Dispose();

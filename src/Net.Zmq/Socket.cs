@@ -449,8 +449,9 @@ public sealed class Socket : IDisposable
         if (actualSize != expectSize)
             throw new ZmqException(ZmqConstants.ESIZEMISMATCH, "Received size does not match expected size");
 
-        // Update actual data size for pooled messages
+        // Update actual data size for pooled messages and reinitialize zmq_msg_t
         message._actualDataSize = actualSize;
+        message.ReinitializeZmqMsg(actualSize);
 
         return actualSize;
     }
