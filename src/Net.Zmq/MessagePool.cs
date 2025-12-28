@@ -8,16 +8,17 @@ namespace Net.Zmq;
 /// <summary>
 /// Predefined message sizes for MessagePool operations.
 /// All sizes are powers of 2 from 16 bytes to 4 MB.
+/// Note: Sizes 64 bytes and below are not pooled (returns regular Message using ArrayPool).
 /// </summary>
 public enum MessageSize
 {
-    /// <summary>16 bytes</summary>
+    /// <summary>16 bytes (not pooled, returns regular Message)</summary>
     B16 = 16,
-    /// <summary>32 bytes</summary>
+    /// <summary>32 bytes (not pooled, returns regular Message)</summary>
     B32 = 32,
-    /// <summary>64 bytes</summary>
+    /// <summary>64 bytes (not pooled, returns regular Message)</summary>
     B64 = 64,
-    /// <summary>128 bytes</summary>
+    /// <summary>128 bytes (minimum pooled size)</summary>
     B128 = 128,
     /// <summary>256 bytes</summary>
     B256 = 256,
@@ -58,14 +59,12 @@ public enum MessageSize
 /// </summary>
 public sealed class MessagePool
 {
-    // Bucket sizes: powers of 2 from 16 bytes to 4 MB
+    // Bucket sizes: powers of 2 from 128 bytes to 4 MB
     // IMPORTANT: Must be declared before Shared to ensure proper initialization order
+    // Note: 64 bytes and below are not pooled (ArrayPool is faster for small sizes)
     private static readonly int[] BucketSizes =
     [
-        16,       // 16 B
-        32,       // 32 B
-        64,       // 64 B
-        128,      // 128 B
+        128,      // 128 B (minimum pooled size)
         256,      // 256 B
         512,      // 512 B
         1024,     // 1 KB
@@ -84,30 +83,28 @@ public sealed class MessagePool
     ];
 
     // Max buffers per bucket: smaller buffers = more count, larger buffers = fewer count
-    // Rationale: Small buffers are cheap (16B-512B), large buffers are expensive (1MB-4MB)
+    // Rationale: Small buffers are cheap (128B-512B), large buffers are expensive (1MB-4MB)
     private static readonly int[] MaxBuffersPerBucket =
     [
-        1000,  // 16 B   - very cheap, high count
-        1000,  // 32 B   - very cheap, high count
-        1000,  // 64 B   - very cheap, high count
-        1000,  // 128 B  - very cheap, high count
-        1000,  // 256 B  - cheap, high count
-        1000,  // 512 B  - cheap, high count
-        500,   // 1 KB   - moderate, medium count
-        500,   // 2 KB   - moderate, medium count
-        500,   // 4 KB   - moderate, medium count
-        250,   // 8 KB   - medium cost
-        250,   // 16 KB  - medium cost
-        250,   // 32 KB  - medium cost
-        250,   // 64 KB  - medium cost
+        1000,  // 128 B - cheap, high count
+        1000,  // 256 B - cheap, high count
+        1000,  // 512 B - cheap, high count
+        500,   // 1 KB  - moderate, medium count
+        500,   // 2 KB  - moderate, medium count
+        500,   // 4 KB  - moderate, medium count
+        250,   // 8 KB  - medium cost
+        250,   // 16 KB - medium cost
+        250,   // 32 KB - medium cost
+        250,   // 64 KB - medium cost
         100,   // 128 KB - expensive, low count
         100,   // 256 KB - expensive, low count
         100,   // 512 KB - expensive, low count
-        50,    // 1 MB   - very expensive, very low count
-        50,    // 2 MB   - very expensive, very low count
-        50     // 4 MB   - very expensive, very low count
+        50,    // 1 MB - very expensive, very low count
+        50,    // 2 MB - very expensive, very low count
+        50     // 4 MB - very expensive, very low count
     ];
 
+    private const int MinPoolableSize = 64;      // 64 bytes or below not pooled (ArrayPool is faster)
     private const int MaxPoolableSize = 4194304; // 4MB
 
     /// <summary>
@@ -124,7 +121,7 @@ public sealed class MessagePool
     private readonly ConcurrentStack<Message>[] _pooledMessages;
 
     // Per-bucket Interlocked counters for O(1) thread-safe maxBuffer enforcement
-    private long[] _pooledMessageCounts = new long[19];  // Per-bucket counters
+    private long[] _pooledMessageCounts = new long[16];  // Per-bucket counters
     private long _poolRejects = 0;  // Messages rejected due to maxBuffer
 
     // Statistics
@@ -194,33 +191,21 @@ public sealed class MessagePool
 
     /// <summary>
     /// 풀에서 재사용할 수 있는 Message를 생성합니다.
-    /// zmq_msg_t를 버킷 크기로 한 번만 초기화하고, 이후 재사용합니다.
+    /// zmq_msg_t는 빈 VSM으로 초기화하고, 실제 데이터 바인딩은 ReinitializeZmqMsg에서 수행합니다.
     /// </summary>
     private Message CreatePooledMessage(int bucketSize, int bucketIndex)
     {
         var dataPtr = Marshal.AllocHGlobal(bucketSize);
         // skipInit=true: zmq_msg_init()를 호출하지 않고 메모리만 할당
-        // 이후 zmq_msg_init_data()를 직접 호출
         var msg = new Message(skipInit: true);
 
         // 콜백 설정
         msg._reusableCallback = (ptr) => ReturnMessageToPool(msg);
         msg._callbackHandle = GCHandle.Alloc(msg._reusableCallback);
 
-        // zmq_msg_t를 버킷 크기로 한 번만 초기화!
-        nint ffnPtr;
-        unsafe
-        {
-            ffnPtr = (nint)FreeCallbackFunctionPointer;
-        }
-
-        var result = Core.Native.LibZmq.MsgInitDataPtr(
-            msg._msgPtr,
-            dataPtr,
-            (nuint)bucketSize,
-            ffnPtr,
-            GCHandle.ToIntPtr(msg._callbackHandle));
-
+        // zmq_msg_t를 빈 VSM으로 초기화 (콜백 없음)
+        // 실제 데이터 바인딩은 ReinitializeZmqMsg에서 수행
+        var result = Core.Native.LibZmq.MsgInitPtr(msg._msgPtr);
         if (result != 0)
         {
             msg._callbackHandle.Free();
@@ -235,7 +220,6 @@ public sealed class MessagePool
         msg._poolActualSize = bucketSize;
 
         // 새로운 필드들 직접 초기화 (internal 필드이므로 직접 접근 가능)
-        // SetActualDataSize를 호출하기 전에 _bufferSize를 먼저 설정해야 함
         msg._bufferSize = bucketSize;
         msg._actualDataSize = bucketSize;  // 초기에는 전체 버킷 크기
 
@@ -336,8 +320,13 @@ public sealed class MessagePool
             }
         }
 
-        // 3. zmq_msg_t 재초기화 및 실제 데이터 크기 설정
-        msg.ReinitializeZmqMsg(actualSize);
+        // 3. 실제 데이터 크기로 재설정 (풀 메시지만, 크기가 다를 때만)
+        // RentReusable에서 이미 ReinitializeZmqMsg(bufferSize)가 호출됨
+        // actualSize != bufferSize인 경우에만 재초기화 필요
+        if (msg._isFromPool && actualSize != msg._bufferSize)
+        {
+            msg.SetActualDataSize(actualSize);
+        }
 
         return msg;
     }
@@ -354,9 +343,10 @@ public sealed class MessagePool
     }
 
     /// <summary>
-    /// 재사용 가능한 Message를 대여합니다 (새로운 방식).
+    /// 재사용 가능한 Message를 대여합니다.
     /// Message 객체를 재사용하므로 매우 빠릅니다.
     /// </summary>
+    /// <param name="size">요청 크기 (버킷 선택용)</param>
     private Message RentReusable(int size)
     {
         var bucketIndex = GetBucketIndex(size);
@@ -374,6 +364,9 @@ public sealed class MessagePool
             return msg;
         }
 
+        Message? result = null;
+        bool isHit = false;
+
         // Tier 1: Try thread-local cache first (lock-free, fastest, O(1) access)
         var cache = _threadLocalCache.Value;
         if (cache != null)
@@ -382,40 +375,43 @@ public sealed class MessagePool
             if (bucket.count > 0)
             {
                 bucket.count--;
-                var msg = bucket.cache[bucket.count]!;
+                result = bucket.cache[bucket.count]!;
                 bucket.cache[bucket.count] = null;
-                msg.PrepareForReuse();
-                if (EnableStatistics)
-                {
-                    Interlocked.Increment(ref _poolHits);
-                    Interlocked.Increment(ref _totalRents);
-                }
-                return msg;
+                result.PrepareForReuse();
+                isHit = true;
             }
         }
 
         // Tier 2: Try shared pool (ConcurrentStack)
-        if (_pooledMessages[bucketIndex].TryPop(out var pooledMsg))
+        if (result == null && _pooledMessages[bucketIndex].TryPop(out var pooledMsg))
         {
             Interlocked.Decrement(ref _pooledMessageCounts[bucketIndex]);
             pooledMsg.PrepareForReuse();
-            if (EnableStatistics)
-            {
-                Interlocked.Increment(ref _poolHits);
-                Interlocked.Increment(ref _totalRents);
-            }
-            return pooledMsg;
+            result = pooledMsg;
+            isHit = true;
         }
 
         // 풀에 없으면 새로 생성
-        var bucketSize = GetBucketSize(bucketIndex);
-        var newMsg = CreatePooledMessage(bucketSize, bucketIndex);
+        if (result == null)
+        {
+            var bucketSize = GetBucketSize(bucketIndex);
+            result = CreatePooledMessage(bucketSize, bucketIndex);
+        }
+
+        // 통계 업데이트
         if (EnableStatistics)
         {
-            Interlocked.Increment(ref _poolMisses);
+            if (isHit)
+                Interlocked.Increment(ref _poolHits);
+            else
+                Interlocked.Increment(ref _poolMisses);
             Interlocked.Increment(ref _totalRents);
         }
-        return newMsg;
+
+        // zmq_msg_t 초기화 (한 번만 호출)
+        result.ReinitializeZmqMsg(result._bufferSize);
+
+        return result;
     }
 
 
@@ -437,11 +433,12 @@ public sealed class MessagePool
 
     /// <summary>
     /// Selects the appropriate bucket index for the given size.
-    /// Returns -1 if the size is too large to pool.
+    /// Returns -1 if the size is too small or too large to pool.
     /// </summary>
     private static int SelectBucket(int size)
     {
-        if (size > MaxPoolableSize)
+        // Too small or too large to pool
+        if (size <= MinPoolableSize || size > MaxPoolableSize)
             return -1;
 
         // Find the smallest bucket that can fit the requested size
@@ -586,7 +583,15 @@ public sealed class MessagePool
         {
             while (_pooledMessages[i].TryPop(out var msg))
             {
-                // GCHandle 해제
+                // zmq_msg_t 종료 (콜백이 풀 반환을 하지 않도록 플래그 설정)
+                if (msg._initialized)
+                {
+                    Interlocked.Exchange(ref msg._callbackExecuted, 1);
+                    Core.Native.LibZmq.MsgClosePtr(msg._msgPtr);
+                    msg._initialized = false;
+                }
+
+                // GCHandle 해제 (zmq_msg_close 후에 해제해야 callback에서 안전)
                 if (msg._callbackHandle.IsAllocated)
                 {
                     msg._callbackHandle.Free();
@@ -597,13 +602,6 @@ public sealed class MessagePool
                 {
                     Marshal.FreeHGlobal(msg._poolDataPtr);
                     msg._poolDataPtr = nint.Zero;
-                }
-
-                // zmq_msg_t 종료
-                if (msg._initialized)
-                {
-                    Core.Native.LibZmq.MsgClosePtr(msg._msgPtr);
-                    msg._initialized = false;
                 }
             }
 

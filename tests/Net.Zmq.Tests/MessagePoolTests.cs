@@ -27,7 +27,8 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        var data = new byte[] { 1, 2, 3, 4, 5 };
+        var data = new byte[128];
+        Array.Fill(data, (byte)42);
 
         // Act - Rent and dispose without sending
         using (var msg = pool.Rent(data))
@@ -60,7 +61,8 @@ public class MessagePoolTests
         push.Bind("inproc://test-pool-send");
         pull.Connect("inproc://test-pool-send");
 
-        var data = new byte[] { 1, 2, 3, 4, 5 };
+        var data = new byte[128];
+        Array.Fill(data, (byte)42);
 
         // Act - Rent, send, and dispose
         using (var msg = pool.Rent(data))
@@ -69,7 +71,7 @@ public class MessagePoolTests
         }
 
         // Receive to ensure transmission completes
-        var buffer = new byte[10];
+        var buffer = new byte[256];
         pull.Recv(buffer);
 
         // Give time for ZMQ callback execution
@@ -90,7 +92,8 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        var data = new byte[] { 1, 2, 3, 4, 5 };
+        var data = new byte[128];
+        Array.Fill(data, (byte)42);
         int count = 10;
 
         // Act - Rent multiple messages without sending
@@ -125,7 +128,8 @@ public class MessagePoolTests
         push.Bind("inproc://test-pool-mixed");
         pull.Connect("inproc://test-pool-mixed");
 
-        var data = new byte[] { 1, 2, 3, 4, 5 };
+        var data = new byte[128];
+        Array.Fill(data, (byte)42);
 
         // Act - Mix of sent and unsent messages
         // Rent and send
@@ -147,7 +151,7 @@ public class MessagePoolTests
         }
 
         // Receive to ensure transmissions complete
-        var buffer = new byte[10];
+        var buffer = new byte[256];
         pull.Recv(buffer);
         pull.Recv(buffer);
 
@@ -172,7 +176,8 @@ public class MessagePoolTests
 
         // Arrange
         var pool = CreatePoolWithStats();
-        var data = new byte[] { 1, 2, 3, 4, 5 };
+        var data = new byte[128];
+        Array.Fill(data, (byte)42);
 
         // Act
         var stats1 = pool.GetStatistics();
@@ -198,10 +203,10 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        pool.Prewarm(MessageSize.B64, 1);
+        pool.Prewarm(MessageSize.B128, 1);
 
         // Act
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         // Assert - 재사용된 메시지는 초기 상태여야 함
         msg._disposed.Should().BeFalse("message should not be disposed after rent");
@@ -222,11 +227,11 @@ public class MessagePoolTests
         var pool = CreatePoolWithStats();
 
         // Act - Rent and dispose multiple messages
-        var msg1 = pool.Rent(64);
+        var msg1 = pool.Rent(128);
         msg1.Dispose();
         Thread.Sleep(100);
 
-        var msg2 = pool.Rent(64);
+        var msg2 = pool.Rent(128);
         msg2.Dispose();
         Thread.Sleep(100);
 
@@ -241,14 +246,14 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        pool.SetMaxBuffers(MessageSize.B64, 10);
-        pool.Prewarm(MessageSize.B64, 5);
+        pool.SetMaxBuffers(MessageSize.B128, 10);
+        pool.Prewarm(MessageSize.B128, 5);
         int cycleCount = 10;
 
         // Act & Assert
         for (int i = 0; i < cycleCount; i++)
         {
-            var msg = pool.Rent(64);
+            var msg = pool.Rent(128);
             msg.Should().NotBeNull();
             msg._disposed.Should().BeFalse();
             msg._isFromPool.Should().BeTrue();
@@ -272,14 +277,14 @@ public class MessagePoolTests
 
         // Arrange
         var pool = CreatePoolWithStats();
-        pool.SetMaxBuffers(MessageSize.B64, 10);
+        pool.SetMaxBuffers(MessageSize.B128, 10);
         int messageCount = 5;
 
         // Act
         var messages = new List<Message>();
         for (int i = 0; i < messageCount; i++)
         {
-            messages.Add(pool.Rent(64));
+            messages.Add(pool.Rent(128));
         }
 
         var statsBefore = pool.GetStatistics();
@@ -305,7 +310,8 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        var testData = new byte[] { 1, 2, 3, 4, 5 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)42);
 
         // Act
         var msg = pool.Rent(testData);
@@ -325,7 +331,7 @@ public class MessagePoolTests
 
         push.Send(msg); // 메시지 전송
 
-        var buffer = new byte[10];
+        var buffer = new byte[256];
         int received = pull.Recv(buffer);
         received.Should().Be(testData.Length);
         buffer.Take(received).Should().BeEquivalentTo(testData, "received data should match sent data");
@@ -345,7 +351,7 @@ public class MessagePoolTests
         var pool = CreatePoolWithStats();
 
         // Act & Assert - 여러 번 호출해도 항상 재사용 메시지인지 확인
-        using (var msg1 = pool.Rent(64))
+        using (var msg1 = pool.Rent(128))
         {
             msg1.Should().NotBeNull();
             msg1._isFromPool.Should().BeTrue("message rented with size should always be reusable");
@@ -354,7 +360,7 @@ public class MessagePoolTests
 
         Thread.Sleep(50);
 
-        using (var msg2 = pool.Rent(64))
+        using (var msg2 = pool.Rent(128))
         {
             msg2.Should().NotBeNull();
             msg2._isFromPool.Should().BeTrue("message rented with size should always be reusable");
@@ -388,7 +394,8 @@ public class MessagePoolTests
         pull2.Bind("inproc://test-reusable-forward-2");
         push2.Connect("inproc://test-reusable-forward-2");
 
-        var testData = new byte[] { 10, 20, 30, 40, 50 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)42);
 
         // Act - Rent로 재사용 가능 메시지 생성
         var msg = pool.Rent(testData);
@@ -399,7 +406,7 @@ public class MessagePoolTests
         // 첫 번째 소켓으로 전송
         push1.Send(msg);
 
-        var buffer1 = new byte[10];
+        var buffer1 = new byte[256];
         int received1 = pull1.Recv(buffer1);
         received1.Should().Be(testData.Length);
         buffer1.Take(received1).Should().BeEquivalentTo(testData, "first receive should match original data");
@@ -420,7 +427,7 @@ public class MessagePoolTests
         var pool = CreatePoolWithStats();
 
         // Act
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         // Assert - Rent(int size)로 빌린 메시지가 재사용 가능한지 검증
         msg._isFromPool.Should().BeTrue("message should be from pool");
@@ -440,7 +447,8 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        var testData = new byte[] { 10, 20, 30, 40, 50 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)42);
 
         // Act
         var msg = pool.Rent(testData.AsSpan());
@@ -462,20 +470,20 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        pool.Prewarm(MessageSize.B64, 5);
+        pool.Prewarm(MessageSize.B128, 5);
 
         // Act - 같은 사이즈로 여러 번 Rent/Dispose
-        var msg1 = pool.Rent(64);
+        var msg1 = pool.Rent(128);
         var ptr1 = msg1._msgPtr; // Message 객체의 네이티브 포인터
         msg1.Dispose();
         Thread.Sleep(50);
 
-        var msg2 = pool.Rent(64);
+        var msg2 = pool.Rent(128);
         var ptr2 = msg2._msgPtr;
         msg2.Dispose();
         Thread.Sleep(50);
 
-        var msg3 = pool.Rent(64);
+        var msg3 = pool.Rent(128);
         var ptr3 = msg3._msgPtr;
         msg3.Dispose();
         Thread.Sleep(50);
@@ -505,7 +513,9 @@ public class MessagePoolTests
         rep.Bind("inproc://test-data-transfer");
         req.Connect("inproc://test-data-transfer");
 
-        var testData = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        var testData = new byte[128];
+        for (int i = 0; i < testData.Length; i++)
+            testData[i] = (byte)(i + 1);
 
         // Act - REQ-REP 패턴으로 실제 데이터 송수신
         await Task.Run(() =>
@@ -516,7 +526,7 @@ public class MessagePoolTests
 
         await Task.Run(() =>
         {
-            var buffer = new byte[20];
+            var buffer = new byte[256];
             int received = rep.Recv(buffer);
             received.Should().Be(testData.Length);
             buffer.Take(received).Should().BeEquivalentTo(testData);
@@ -527,7 +537,7 @@ public class MessagePoolTests
 
         await Task.Run(() =>
         {
-            var buffer = new byte[10];
+            var buffer = new byte[256];
             req.Recv(buffer);
         });
 
@@ -551,14 +561,13 @@ public class MessagePoolTests
         pull.Connect("inproc://test-multi-roundtrip");
 
         int rounds = 5;
-        var testDataList = new List<byte[]>
+        var testDataList = new List<byte[]>();
+        for (int i = 0; i < 5; i++)
         {
-            new byte[] { 1, 2, 3 },
-            new byte[] { 10, 20, 30, 40 },
-            new byte[] { 100, 101, 102, 103, 104 },
-            new byte[] { 255, 254, 253 },
-            new byte[] { 50, 51, 52, 53, 54, 55 }
-        };
+            var data = new byte[128 + i * 10];
+            Array.Fill(data, (byte)(i + 1));
+            testDataList.Add(data);
+        }
 
         // Act - 여러 번 송수신 반복
         for (int i = 0; i < rounds; i++)
@@ -573,7 +582,7 @@ public class MessagePoolTests
 
             await Task.Run(() =>
             {
-                var buffer = new byte[20];
+                var buffer = new byte[256];
                 int received = pull.Recv(buffer);
                 received.Should().Be(testData.Length, $"round {i + 1} size mismatch");
                 buffer.Take(received).Should().BeEquivalentTo(testData, $"round {i + 1} data mismatch");
@@ -603,7 +612,8 @@ public class MessagePoolTests
         push2.Bind("inproc://recv-forward-2");
         pull2.Connect("inproc://recv-forward-2");
 
-        var testData = new byte[] { 77, 88, 99 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)77);
 
         // Act - ReceiveWithPool로 수신한 메시지를 다른 소켓으로 전송
         await Task.Run(() =>
@@ -627,7 +637,7 @@ public class MessagePoolTests
 
         await Task.Run(() =>
         {
-            var buffer = new byte[10];
+            var buffer = new byte[256];
             int received = pull2.Recv(buffer);
             received.Should().Be(testData.Length);
             buffer.Take(received).Should().BeEquivalentTo(testData);
@@ -646,7 +656,7 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         // Assert - Pooled 메시지인지 확인
         msg._isFromPool.Should().BeTrue();
@@ -669,7 +679,7 @@ public class MessagePoolTests
     public void RegularMessage_Dispose_ClosesMsgT()
     {
         // Arrange - 일반 메시지 생성 (new Message(size))
-        var msg = new Message(64);
+        var msg = new Message(128);
 
         // Assert
         msg._isFromPool.Should().BeFalse("regular message should not be from pool");
@@ -741,7 +751,7 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         // Act - 이중 Dispose
         msg.Dispose();
@@ -767,8 +777,10 @@ public class MessagePoolTests
         push.Bind("inproc://test-mixed-messages");
         pull.Connect("inproc://test-mixed-messages");
 
-        var testData1 = new byte[] { 1, 2, 3 };
-        var testData2 = new byte[] { 10, 20, 30 };
+        var testData1 = new byte[128];
+        Array.Fill(testData1, (byte)1);
+        var testData2 = new byte[128];
+        Array.Fill(testData2, (byte)2);
 
         // Act - Pooled 메시지와 일반 메시지를 섞어서 사용
         await Task.Run(() =>
@@ -785,7 +797,7 @@ public class MessagePoolTests
 
         await Task.Run(() =>
         {
-            var buffer = new byte[10];
+            var buffer = new byte[256];
             int received1 = pull.Recv(buffer);
             received1.Should().Be(testData1.Length);
             buffer.Take(received1).Should().BeEquivalentTo(testData1);
@@ -830,7 +842,7 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        pool.Prewarm(MessageSize.B64, 5);
+        pool.Prewarm(MessageSize.B128, 5);
         pool.Prewarm(MessageSize.K1, 3);
 
         var statsBefore = pool.GetStatistics();
@@ -839,7 +851,7 @@ public class MessagePoolTests
         pool.Clear();
 
         // 새로 Rent하면 풀이 비어있어야 함
-        var msg1 = pool.Rent(64);
+        var msg1 = pool.Rent(128);
         msg1.Dispose();
         Thread.Sleep(50);
 
@@ -881,7 +893,10 @@ public class MessagePoolTests
 
                 for (int i = 0; i < messagesPerThread; i++)
                 {
-                    var testData = new byte[] { (byte)threadId, (byte)i, (byte)(i + 1) };
+                    var testData = new byte[128];
+                    testData[0] = (byte)threadId;
+                    testData[1] = (byte)i;
+                    testData[2] = (byte)(i + 1);
                     using var msg = pool.Rent(testData.AsSpan());
                     push.Send(msg);
                 }
@@ -928,7 +943,8 @@ public class MessagePoolTests
         // Assert
         msg.Should().NotBeNull();
         msg.Size.Should().Be(0);
-        msg._isFromPool.Should().BeTrue("Rent(data) returns pooled message with new design");
+        // Empty data (0 bytes) is not pooled (too small), so _isFromPool should be false
+        msg._isFromPool.Should().BeFalse("empty data is not pooled (size <= MinPoolableSize)");
 
         msg.Dispose();
         Thread.Sleep(50);
@@ -964,17 +980,17 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        pool.Prewarm(MessageSize.B64, 1);
+        pool.Prewarm(MessageSize.B128, 1);
 
         // Act - 첫 번째 사용
-        var msg1 = pool.Rent(64);
+        var msg1 = pool.Rent(128);
         msg1._disposed.Should().BeFalse();
         msg1._wasSuccessfullySent.Should().BeFalse();
         msg1.Dispose();
         Thread.Sleep(100);
 
         // 두 번째 사용 (재사용)
-        var msg2 = pool.Rent(64);
+        var msg2 = pool.Rent(128);
 
         // Assert - PrepareForReuse가 모든 상태를 올바르게 리셋하는지
         msg2._disposed.Should().BeFalse("_disposed should be reset");
@@ -996,17 +1012,17 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        var data = new byte[64]; // 64 bytes 데이터 요청 → 1024 bytes 버킷에서 할당됨
+        var data = new byte[200]; // 200 bytes 데이터 요청 → 256 bytes 버킷에서 할당됨
 
         // Act
         using var msg = pool.Rent(data.AsSpan());
 
-        // Assert - ActualSize는 64, BufferSize는 1024
+        // Assert - ActualSize는 200, BufferSize는 256
         if (msg._isFromPool)
         {
-            msg.ActualDataSize.Should().Be(64, "actual size should match requested data size");
-            msg.BufferSize.Should().BeGreaterOrEqualTo(64, "buffer size should be bucket size");
-            msg.Size.Should().Be(64, "Size property should return actual size for pooled messages");
+            msg.ActualDataSize.Should().Be(200, "actual size should match requested data size");
+            msg.BufferSize.Should().BeGreaterOrEqualTo(200, "buffer size should be bucket size");
+            msg.Size.Should().Be(200, "Size property should return actual size for pooled messages");
         }
 
         msg.Dispose();
@@ -1025,11 +1041,11 @@ public class MessagePoolTests
         rep.Bind("inproc://test-actual-size-send");
         req.Connect("inproc://test-actual-size-send");
 
-        var testData = new byte[64]; // 64 bytes
+        var testData = new byte[200]; // 200 bytes
         for (int i = 0; i < testData.Length; i++)
             testData[i] = (byte)(i + 1);
 
-        // Act - 64 bytes 데이터 전송 (버킷은 1024 bytes일 수 있음)
+        // Act - 200 bytes 데이터 전송 (버킷은 256 bytes일 수 있음)
         await Task.Run(() =>
         {
             using var msg = pool.Rent(testData.AsSpan());
@@ -1049,14 +1065,14 @@ public class MessagePoolTests
 
         await Task.Run(() =>
         {
-            var buffer = new byte[10];
+            var buffer = new byte[256];
             req.Recv(buffer);
         });
 
         Thread.Sleep(100);
 
-        // Assert - 수신측에서 64 bytes만 받아야 함 (1024 아님!)
-        receivedSize.Should().Be(64, "should receive only actual data size, not buffer size");
+        // Assert - 수신측에서 200 bytes만 받아야 함 (256 아님!)
+        receivedSize.Should().Be(200, "should receive only actual data size, not buffer size");
         receivedData.Should().BeEquivalentTo(testData, "received data should match sent data");
     }
 
@@ -1107,7 +1123,7 @@ public class MessagePoolTests
         push.Bind("inproc://test-various-sizes");
         pull.Connect("inproc://test-various-sizes");
 
-        var testSizes = new[] { 32, 64, 128, 256, 512, 1024, 2048 };
+        var testSizes = new[] { 128, 256, 512, 1024, 2048 };
 
         // Act & Assert - 모든 크기에서 정확히 전송되는지
         foreach (var size in testSizes)
@@ -1152,8 +1168,8 @@ public class MessagePoolTests
         // Act - 여러 번 송수신하여 이전 데이터가 남아있지 않은지 확인
         for (int round = 0; round < 5; round++)
         {
-            var testData = new byte[64];
-            for (int i = 0; i < 64; i++)
+            var testData = new byte[200];
+            for (int i = 0; i < 200; i++)
                 testData[i] = (byte)(round * 10 + i);
 
             await Task.Run(() =>
@@ -1164,9 +1180,9 @@ public class MessagePoolTests
 
             await Task.Run(() =>
             {
-                var buffer = new byte[100];
+                var buffer = new byte[256];
                 int received = pull.Recv(buffer);
-                received.Should().Be(64, $"round {round}: size should be 64");
+                received.Should().Be(200, $"round {round}: size should be 200");
 
                 var receivedData = buffer.Take(received).ToArray();
                 receivedData.Should().BeEquivalentTo(testData, $"round {round}: data should not have crosstalk from previous rounds");
@@ -1182,7 +1198,7 @@ public class MessagePoolTests
         // Arrange
         var pool = CreatePoolWithStats();
 
-        // Act - 다양한 크기로 재사용 (1024 → 64 → 512 → 128)
+        // Act - 다양한 크기로 재사용 (1024 → 200 → 512 → 128)
         var data1024 = new byte[1024];
         using (var msg1 = pool.Rent(data1024.AsSpan()))
         {
@@ -1193,12 +1209,12 @@ public class MessagePoolTests
         }
         Thread.Sleep(50);
 
-        var data64 = new byte[64];
-        using (var msg2 = pool.Rent(data64.AsSpan()))
+        var data200 = new byte[200];
+        using (var msg2 = pool.Rent(data200.AsSpan()))
         {
             if (msg2._isFromPool)
             {
-                msg2.ActualDataSize.Should().Be(64);
+                msg2.ActualDataSize.Should().Be(200);
             }
         }
         Thread.Sleep(50);
@@ -1255,7 +1271,7 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         // Act & Assert
         if (msg._isFromPool)
@@ -1273,7 +1289,7 @@ public class MessagePoolTests
     public void SetActualDataSize_OnNonPooledMessage_ThrowsException()
     {
         // Arrange - 일반 메시지 생성
-        var msg = new Message(64);
+        var msg = new Message(128);
 
         // Act & Assert
         Action act = () => msg.SetActualDataSize(32);
@@ -1295,7 +1311,8 @@ public class MessagePoolTests
         push.Bind("inproc://test-receive-reusable");
         pull.Connect("inproc://test-receive-reusable");
 
-        var testData = new byte[] { 111, 222, 33 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)111);
 
         // Act
         await Task.Run(() => push.Send(testData));
@@ -1332,7 +1349,8 @@ public class MessagePoolTests
         push2.Bind("inproc://test-forward-2");
         pull2.Connect("inproc://test-forward-2");
 
-        var testData = new byte[] { 1, 2, 3, 4, 5 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)42);
 
         // Act - 수신 → 다른 소켓으로 재전송
         await Task.Run(() => push1.Send(testData));
@@ -1352,7 +1370,7 @@ public class MessagePoolTests
         byte[]? finalData = null;
         await Task.Run(() =>
         {
-            var buffer = new byte[100];
+            var buffer = new byte[256];
             int received = pull2.Recv(buffer);
             finalData = buffer.Take(received).ToArray();
         });
@@ -1380,7 +1398,8 @@ public class MessagePoolTests
         client.Connect("inproc://proxy-frontend");
         server.Connect("inproc://proxy-backend");
 
-        var testData = new byte[] { 10, 20, 30, 40, 50 };
+        var testData = new byte[128];
+        Array.Fill(testData, (byte)42);
 
         // Act - Client → Frontend → Backend → Server
         var proxyTask = Task.Run(() =>
@@ -1404,7 +1423,7 @@ public class MessagePoolTests
         await Task.Run(() =>
         {
             // Server: 데이터 수신
-            var buffer = new byte[100];
+            var buffer = new byte[256];
             int received = server.Recv(buffer);
             receivedData = buffer.Take(received).ToArray();
         });
@@ -1420,15 +1439,15 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = new MessagePool();
-        var testData = new byte[64];
-        for (int i = 0; i < 64; i++)
+        var testData = new byte[200];
+        for (int i = 0; i < 200; i++)
             testData[i] = (byte)(i + 100);
 
         // Act
         using var msg = pool.Rent(testData.AsSpan());
 
         // Assert - Data property가 ActualSize 크기의 Span을 반환하는지
-        msg.Data.Length.Should().Be(64, "Data should return span of actual size");
+        msg.Data.Length.Should().Be(200, "Data should return span of actual size");
 
         if (msg._isFromPool)
         {
@@ -1481,7 +1500,7 @@ public class MessagePoolTests
     {
         // Arrange
         var pool = CreatePoolWithStats();
-        pool.SetMaxBuffers(MessageSize.B64, 2); // Limit to 2 buffers in shared pool
+        pool.SetMaxBuffers(MessageSize.B128, 2); // Limit to 2 buffers in shared pool
 
         var statsBefore = pool.GetStatistics();
 
@@ -1491,7 +1510,7 @@ public class MessagePoolTests
         var messages = new List<Message>();
         for (int i = 0; i < 11; i++)
         {
-            messages.Add(pool.Rent(64));
+            messages.Add(pool.Rent(128));
         }
 
         // Dispose all 11 at once
@@ -1680,7 +1699,7 @@ public class MessagePoolTests
 
         // Arrange
         var pool = CreatePoolWithStats();
-        var msg = pool.Rent(64);
+        var msg = pool.Rent(128);
 
         var statsBeforeFirstDispose = pool.GetStatistics();
 
@@ -1755,7 +1774,7 @@ public class MessagePoolTests
         pull.Connect("inproc://small-test");
         await Task.Delay(100);
 
-        const int messageSize = 64; // Small message
+        const int messageSize = 128; // Small message
         var sourceData = new byte[messageSize];
         Array.Fill(sourceData, (byte)'S');
 
@@ -1789,7 +1808,7 @@ public class MessagePoolTests
         socket.Bind("inproc://error-test");
 
         // Act - Try to receive with DontWait (should return -1)
-        const int testSize = 64;
+        const int testSize = 128;
         var msg = MessagePool.Shared.Rent(testSize);
         int result = socket.Recv(msg, testSize, RecvFlags.DontWait);
 

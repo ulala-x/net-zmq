@@ -428,18 +428,8 @@ public sealed class Message : IDisposable
     {
         EnsureInitialized();
 
-        // Pooled 메시지: zmq_msg_t가 올바른 크기로 초기화되어 있는지 확인
-        // - 재사용된 메시지는 이전 send 후 nullified 상태 (size=0)
-        // - SetActualDataSize() 없이 Send() 호출된 경우 처리
-        if (_isFromPool && _poolDataPtr != nint.Zero)
-        {
-            var msgSize = (int)LibZmq.MsgSizePtr(_msgPtr);
-            if (msgSize != _actualDataSize)
-            {
-                ReinitializeZmqMsg(_actualDataSize);
-            }
-        }
-
+        // Pooled 메시지는 Rent 시점에 이미 ReinitializeZmqMsg가 호출됨
+        // SetActualDataSize로 크기 변경 시에도 ReinitializeZmqMsg가 호출됨
         var result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
         ZmqException.ThrowIfError(result);
         _wasSuccessfullySent = true;
@@ -532,16 +522,16 @@ public sealed class Message : IDisposable
 
         _actualDataSize = actualSize;
 
-        // zmq_msg_t를 닫아서 이전 상태 정리 (빈 VSM이라도 close 필요)
-        // 콜백이 풀 반환을 하지 않도록 플래그 설정
+        // 콜백 차단: 전체 재초기화 과정 동안 OLD 콜백이 실행되지 않도록 함
+        // zmq_msg_init_data가 완료될 때까지 유지해야 race condition 방지
+        Interlocked.Exchange(ref _callbackExecuted, 1);
+
+        // zmq_msg_init_data는 uninitialized msg에서 호출해야 함
+        // VSM이라도 close 필요 (VSM은 콜백 없음)
         if (_initialized)
         {
-            // 콜백 실행 표시를 먼저 설정하여 풀 반환 방지
-            Interlocked.Exchange(ref _callbackExecuted, 1);
             Core.Native.LibZmq.MsgClosePtr(_msgPtr);
             _initialized = false;
-            // 재초기화를 위해 플래그 리셋
-            Interlocked.Exchange(ref _callbackExecuted, 0);
         }
 
         nint ffnPtr;
@@ -559,6 +549,9 @@ public sealed class Message : IDisposable
 
         ZmqException.ThrowIfError(result);
         _initialized = true;
+
+        // 새 콜백이 등록된 후에만 콜백 허용
+        Interlocked.Exchange(ref _callbackExecuted, 0);
     }
 
     /// <summary>
@@ -580,17 +573,18 @@ public sealed class Message : IDisposable
         if (!_isFromPool)
             throw new InvalidOperationException("This method is only for pooled messages");
 
-        // GCHandle 해제
+        // zmq_msg_t 닫기 (콜백이 풀 반환을 하지 않도록 플래그 설정)
+        if (_initialized)
+        {
+            Interlocked.Exchange(ref _callbackExecuted, 1);
+            LibZmq.MsgClosePtr(_msgPtr);
+            _initialized = false;
+        }
+
+        // GCHandle 해제 (zmq_msg_close 후에 해제해야 callback에서 안전)
         if (_callbackHandle.IsAllocated)
         {
             _callbackHandle.Free();
-        }
-
-        // zmq_msg_t 닫기
-        if (_initialized)
-        {
-            LibZmq.MsgClosePtr(_msgPtr);
-            _initialized = false;
         }
 
         // 네이티브 메모리 해제
@@ -625,17 +619,27 @@ public sealed class Message : IDisposable
         {
             _disposed = true;
 
-            // Send()로 보내지지 않은 경우에만 콜백을 수동으로 호출
-            // Send()로 보낸 경우는 ZMQ가 자동으로 콜백을 호출함
+            // Send()로 보내지지 않은 경우:
+            // 1. zmq_msg_close + zmq_msg_init으로 VSM 상태로 만듦
+            // 2. 콜백 직접 호출하여 풀에 반환
+            // Send()로 보낸 경우: ZMQ가 자동으로 콜백 호출 (이미 VSM 상태)
             if (!_wasSuccessfullySent)
             {
-                // 중요: zmq_msg_close() 대신 콜백 직접 호출
-                // zmq_msg_t는 초기화된 상태로 유지되어 재사용됨
+                // lmsg를 VSM으로 변환 (콜백 무효화)
+                if (_initialized)
+                {
+                    Interlocked.Exchange(ref _callbackExecuted, 1);
+                    LibZmq.MsgClosePtr(_msgPtr);
+                    // 빈 VSM으로 재초기화 (다음 Rent에서 ReinitializeZmqMsg 호출 시 필요)
+                    LibZmq.MsgInitPtr(_msgPtr);
+                    Interlocked.Exchange(ref _callbackExecuted, 0);
+                }
+
+                // 콜백 직접 호출하여 풀에 반환
                 _reusableCallback?.Invoke(nint.Zero);
             }
 
-            // _initialized는 true로 유지 - zmq_msg_t는 계속 초기화된 상태
-            // zmq_msg_close() 호출하지 않음!
+            // _initialized는 true로 유지 - zmq_msg_t는 계속 초기화된 상태 (VSM)
 
             GC.SuppressFinalize(this);
             return;

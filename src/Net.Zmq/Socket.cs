@@ -449,10 +449,16 @@ public sealed class Socket : IDisposable
         if (actualSize != expectSize)
             throw new ZmqException(ZmqConstants.ESIZEMISMATCH, "Received size does not match expected size");
 
-        // Update actual data size for pooled messages
-        // Note: ReinitializeZmqMsg is NOT called here - it's only needed before Send()
-        // and Send() already handles auto-reinitialization when needed
-        message._actualDataSize = actualSize;
+        // Update actual data size and reinitialize zmq_msg_t for pooled messages
+        // This ensures the message can be forwarded with the correct size
+        if (message._isFromPool && actualSize != message._actualDataSize)
+        {
+            message.ReinitializeZmqMsg(actualSize);
+        }
+        else
+        {
+            message._actualDataSize = actualSize;
+        }
 
         return actualSize;
     }
