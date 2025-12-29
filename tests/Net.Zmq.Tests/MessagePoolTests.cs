@@ -211,7 +211,6 @@ public class MessagePoolTests
         // Assert - 재사용된 메시지는 초기 상태여야 함
         msg._disposed.Should().BeFalse("message should not be disposed after rent");
         msg._wasSuccessfullySent.Should().BeFalse("message should not be marked as sent after rent");
-        msg._callbackExecuted.Should().Be(0, "callback should not be executed after rent");
         msg._isFromPool.Should().BeTrue("message should be marked as from pool");
         msg._reusableCallback.Should().NotBeNull("reusable callback should be set");
 
@@ -432,7 +431,6 @@ public class MessagePoolTests
         // Assert - Rent(int size)로 빌린 메시지가 재사용 가능한지 검증
         msg._isFromPool.Should().BeTrue("message should be from pool");
         msg._reusableCallback.Should().NotBeNull("reusable message should have callback");
-        msg._callbackHandle.IsAllocated.Should().BeTrue("GCHandle should be allocated");
         msg._poolBucketIndex.Should().BeGreaterOrEqualTo(0, "bucket index should be valid");
 
         msg.Dispose();
@@ -995,7 +993,6 @@ public class MessagePoolTests
         // Assert - PrepareForReuse가 모든 상태를 올바르게 리셋하는지
         msg2._disposed.Should().BeFalse("_disposed should be reset");
         msg2._wasSuccessfullySent.Should().BeFalse("_wasSuccessfullySent should be reset");
-        msg2._callbackExecuted.Should().Be(0, "_callbackExecuted should be reset");
         msg2._isFromPool.Should().BeTrue("_isFromPool should remain true");
         msg2._initialized.Should().BeTrue("zmq_msg_t should remain initialized");
 

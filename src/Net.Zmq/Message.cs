@@ -22,9 +22,7 @@ public sealed class Message : IDisposable
 
     // 재사용 가능한 Message 전용 필드
     internal bool _isFromPool = false;                  // 풀에서 재사용되는 Message 객체 여부
-    internal Action<nint>? _reusableCallback = null;    // 재사용 가능한 콜백
-    internal int _callbackExecuted = 0;                 // 콜백 실행 여부 (0 or 1)
-    internal GCHandle _callbackHandle;                  // 콜백 GCHandle
+    internal Action<nint>? _reusableCallback = null;    // 재사용 가능한 콜백 (풀 반환용)
 
     // 새로운 필드: 실제 데이터 크기와 버퍼 크기 추적
     internal int _actualDataSize;  // 실제 데이터 크기 (예: 64 bytes)
@@ -409,11 +407,8 @@ public sealed class Message : IDisposable
             NativeMemory.Copy((void*)sourcePtr, (void*)_poolDataPtr, (nuint)size);
         }
 
-        // 실제 데이터 크기로 zmq_msg_t 재초기화 (zero-copy 전송 준비)
-        if (_isFromPool)
-        {
-            ReinitializeZmqMsg(size);
-        }
+        // 실제 데이터 크기 업데이트
+        _actualDataSize = size;
     }
 
     /// <summary>
@@ -428,11 +423,26 @@ public sealed class Message : IDisposable
     {
         EnsureInitialized();
 
-        // Pooled 메시지는 Rent 시점에 이미 ReinitializeZmqMsg가 호출됨
-        // SetActualDataSize로 크기 변경 시에도 ReinitializeZmqMsg가 호출됨
-        var result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
-        ZmqException.ThrowIfError(result);
-        _wasSuccessfullySent = true;
+        int result;
+
+        // Pooled 메시지: zmq_send로 버퍼 주소와 크기만 전송
+        if (_isFromPool && _poolDataPtr != nint.Zero)
+        {
+            result = LibZmq.Send(socket, _poolDataPtr, (nuint)_actualDataSize, (int)flags);
+            ZmqException.ThrowIfError(result);
+
+            // zmq_send는 동기적으로 복사 완료 → 즉시 풀에 반환
+            // _wasSuccessfullySent를 먼저 설정하여 Dispose에서 중복 반환 방지
+            _wasSuccessfullySent = true;
+            _reusableCallback?.Invoke(nint.Zero);
+        }
+        else
+        {
+            // 일반 메시지: zmq_msg_send 사용
+            result = LibZmq.MsgSendPtr(_msgPtr, socket, (int)flags);
+            ZmqException.ThrowIfError(result);
+            _wasSuccessfullySent = true;
+        }
 
         return result;
     }
@@ -468,16 +478,14 @@ public sealed class Message : IDisposable
 
     /// <summary>
     /// 재사용을 위해 Message 상태를 초기화합니다.
-    /// 플래그를 리셋합니다. zmq_msg_t는 다음 사용 시점(데이터 설정 시)에 재초기화됩니다.
+    /// 플래그를 리셋합니다.
     /// </summary>
     internal void PrepareForReuse()
     {
         _disposed = false;
         _wasSuccessfullySent = false;
-        Interlocked.Exchange(ref _callbackExecuted, 0);
 
         // 리셋 시 전체 버퍼 사용 가능하도록 설정
-        // zmq_msg_t 재초기화는 데이터 설정 시점(SetActualDataSize 또는 Rent)에 수행
         if (_isFromPool && _poolDataPtr != nint.Zero)
         {
             _actualDataSize = _bufferSize;
@@ -507,52 +515,8 @@ public sealed class Message : IDisposable
             throw new ArgumentException("Size cannot be negative", nameof(size));
 
         _actualDataSize = size;
-        ReinitializeZmqMsg(size);
     }
 
-    /// <summary>
-    /// Pooled 메시지의 zmq_msg_t를 재초기화합니다.
-    /// zmq_msg_send 후 빈 VSM이 된 zmq_msg_t를 데이터 버퍼로 다시 바인딩합니다.
-    /// </summary>
-    /// <param name="actualSize">실제 데이터 크기</param>
-    internal void ReinitializeZmqMsg(int actualSize)
-    {
-        if (!_isFromPool || _poolDataPtr == nint.Zero)
-            return;
-
-        _actualDataSize = actualSize;
-
-        // 콜백 차단: 전체 재초기화 과정 동안 OLD 콜백이 실행되지 않도록 함
-        // zmq_msg_init_data가 완료될 때까지 유지해야 race condition 방지
-        Interlocked.Exchange(ref _callbackExecuted, 1);
-
-        // zmq_msg_init_data는 uninitialized msg에서 호출해야 함
-        // VSM이라도 close 필요 (VSM은 콜백 없음)
-        if (_initialized)
-        {
-            Core.Native.LibZmq.MsgClosePtr(_msgPtr);
-            _initialized = false;
-        }
-
-        nint ffnPtr;
-        unsafe
-        {
-            ffnPtr = (nint)MessagePool.FreeCallbackFunctionPointer;
-        }
-
-        var result = Core.Native.LibZmq.MsgInitDataPtr(
-            _msgPtr,
-            _poolDataPtr,
-            (nuint)actualSize,
-            ffnPtr,
-            GCHandle.ToIntPtr(_callbackHandle));
-
-        ZmqException.ThrowIfError(result);
-        _initialized = true;
-
-        // 새 콜백이 등록된 후에만 콜백 허용
-        Interlocked.Exchange(ref _callbackExecuted, 0);
-    }
 
     /// <summary>
     /// Message를 풀에 반환합니다 (휴면 상태로 표시).
@@ -573,18 +537,11 @@ public sealed class Message : IDisposable
         if (!_isFromPool)
             throw new InvalidOperationException("This method is only for pooled messages");
 
-        // zmq_msg_t 닫기 (콜백이 풀 반환을 하지 않도록 플래그 설정)
+        // zmq_msg_t 닫기
         if (_initialized)
         {
-            Interlocked.Exchange(ref _callbackExecuted, 1);
             LibZmq.MsgClosePtr(_msgPtr);
             _initialized = false;
-        }
-
-        // GCHandle 해제 (zmq_msg_close 후에 해제해야 callback에서 안전)
-        if (_callbackHandle.IsAllocated)
-        {
-            _callbackHandle.Free();
         }
 
         // 네이티브 메모리 해제
@@ -614,32 +571,16 @@ public sealed class Message : IDisposable
             return;
         }
 
-        // Pool 메시지 (재사용 가능): 콜백만 호출하고 zmq_msg_t는 닫지 않음
+        // Pool 메시지 (재사용 가능): 콜백만 호출하여 풀에 반환
         if (_isFromPool)
         {
             _disposed = true;
 
-            // Send()로 보내지지 않은 경우:
-            // 1. zmq_msg_close + zmq_msg_init으로 VSM 상태로 만듦
-            // 2. 콜백 직접 호출하여 풀에 반환
-            // Send()로 보낸 경우: ZMQ가 자동으로 콜백 호출 (이미 VSM 상태)
+            // Send()에서 이미 반환했으면 중복 반환 방지
             if (!_wasSuccessfullySent)
             {
-                // lmsg를 VSM으로 변환 (콜백 무효화)
-                if (_initialized)
-                {
-                    Interlocked.Exchange(ref _callbackExecuted, 1);
-                    LibZmq.MsgClosePtr(_msgPtr);
-                    // 빈 VSM으로 재초기화 (다음 Rent에서 ReinitializeZmqMsg 호출 시 필요)
-                    LibZmq.MsgInitPtr(_msgPtr);
-                    Interlocked.Exchange(ref _callbackExecuted, 0);
-                }
-
-                // 콜백 직접 호출하여 풀에 반환
                 _reusableCallback?.Invoke(nint.Zero);
             }
-
-            // _initialized는 true로 유지 - zmq_msg_t는 계속 초기화된 상태 (VSM)
 
             GC.SuppressFinalize(this);
             return;

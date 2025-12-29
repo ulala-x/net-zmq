@@ -160,38 +160,10 @@ public sealed class MessagePool
         }, trackAllValues: false);
     }
 
-    /// <summary>
-    /// Unmanaged callback function pointer for zmq_msg_init_data.
-    /// Uses UnmanagedCallersOnly for modern .NET P/Invoke.
-    /// </summary>
-    internal static readonly unsafe delegate* unmanaged[Cdecl]<nint, nint, void> FreeCallbackFunctionPointer = &FreeCallbackImpl;
-
-    /// <summary>
-    /// ZeroMQ free callback 구현.
-    /// data 파라미터는 사용하지 않고, hint에 저장된 GCHandle을 통해 콜백을 실행합니다.
-    /// </summary>
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static void FreeCallbackImpl(nint data, nint hint)
-    {
-        if (hint == nint.Zero)
-            return;
-
-        try
-        {
-            var handle = GCHandle.FromIntPtr(hint);
-            var callback = handle.Target as Action<nint>;
-            callback?.Invoke(nint.Zero);
-            // 주의: GCHandle은 여기서 해제하지 않음 (Message가 재사용되므로)
-        }
-        catch
-        {
-            // Swallow exceptions in unmanaged callback
-        }
-    }
 
     /// <summary>
     /// 풀에서 재사용할 수 있는 Message를 생성합니다.
-    /// zmq_msg_t는 빈 VSM으로 초기화하고, 실제 데이터 바인딩은 ReinitializeZmqMsg에서 수행합니다.
+    /// zmq_msg_t는 빈 VSM으로 초기화합니다.
     /// </summary>
     private Message CreatePooledMessage(int bucketSize, int bucketIndex)
     {
@@ -199,16 +171,13 @@ public sealed class MessagePool
         // skipInit=true: zmq_msg_init()를 호출하지 않고 메모리만 할당
         var msg = new Message(skipInit: true);
 
-        // 콜백 설정
+        // 콜백 설정 (풀 반환용)
         msg._reusableCallback = (ptr) => ReturnMessageToPool(msg);
-        msg._callbackHandle = GCHandle.Alloc(msg._reusableCallback);
 
-        // zmq_msg_t를 빈 VSM으로 초기화 (콜백 없음)
-        // 실제 데이터 바인딩은 ReinitializeZmqMsg에서 수행
+        // zmq_msg_t를 빈 VSM으로 초기화
         var result = Core.Native.LibZmq.MsgInitPtr(msg._msgPtr);
         if (result != 0)
         {
-            msg._callbackHandle.Free();
             Marshal.FreeHGlobal(dataPtr);
             throw new ZmqException();
         }
@@ -232,47 +201,52 @@ public sealed class MessagePool
     /// </summary>
     private void ReturnMessageToPool(Message msg)
     {
-        if (Interlocked.CompareExchange(ref msg._callbackExecuted, 1, 0) == 0)
+        int bucketIndex = msg._poolBucketIndex;
+        msg.ReturnToPool();
+
+        // Tier 1: Try to return to thread-local cache first (lock-free, fastest, O(1) access)
+        // Thread-local cache doesn't count toward maxBuffer limit (like ArrayPool)
+        var cache = _threadLocalCache.Value;
+        if (cache != null)
         {
-            int bucketIndex = msg._poolBucketIndex;
-            msg.ReturnToPool();
-
-            // Tier 1: Try to return to thread-local cache first (lock-free, fastest, O(1) access)
-            // Thread-local cache doesn't count toward maxBuffer limit (like ArrayPool)
-            var cache = _threadLocalCache.Value;
-            if (cache != null)
+            ref var bucket = ref cache[bucketIndex];
+            if (bucket.count < ThreadLocalCacheSize)
             {
-                ref var bucket = ref cache[bucketIndex];
-                if (bucket.count < ThreadLocalCacheSize)
-                {
-                    bucket.cache[bucket.count] = msg;
-                    bucket.count++;
-                    if (EnableStatistics)
-                        Interlocked.Increment(ref _totalReturns);
-                    return;
-                }
-            }
-
-            // Tier 2: Thread-local cache is full, try to return to shared pool
-            // Check if shared pool has room using Interlocked counter (O(1), thread-safe)
-            if (Interlocked.Read(ref _pooledMessageCounts[bucketIndex]) < MaxBuffersPerBucket[bucketIndex])
-            {
-                _pooledMessages[bucketIndex].Push(msg);
-                Interlocked.Increment(ref _pooledMessageCounts[bucketIndex]);  // Update counter
+                bucket.cache[bucket.count] = msg;
+                bucket.count++;
                 if (EnableStatistics)
                     Interlocked.Increment(ref _totalReturns);
+                return;
             }
-            else
+        }
+
+        // Tier 2: Thread-local cache is full, try to return to shared pool
+        // Atomically check and increment counter to avoid race conditions
+        long currentCount;
+        long newCount;
+        do
+        {
+            currentCount = Interlocked.Read(ref _pooledMessageCounts[bucketIndex]);
+            if (currentCount >= MaxBuffersPerBucket[bucketIndex])
             {
-                // Both thread-local cache and shared pool are full - actually dispose the message
+                // Pool is full - dispose the message
                 msg.DisposePooledMessage();
                 if (EnableStatistics)
                 {
                     Interlocked.Increment(ref _totalReturns);
                     Interlocked.Increment(ref _poolRejects);
                 }
+                return;
             }
+            newCount = currentCount + 1;
         }
+        // Only push if we successfully reserved a slot
+        while (Interlocked.CompareExchange(ref _pooledMessageCounts[bucketIndex], newCount, currentCount) != currentCount);
+
+        // We successfully reserved a slot, now push the message
+        _pooledMessages[bucketIndex].Push(msg);
+        if (EnableStatistics)
+            Interlocked.Increment(ref _totalReturns);
     }
 
     /// <summary>
@@ -320,12 +294,10 @@ public sealed class MessagePool
             }
         }
 
-        // 3. 실제 데이터 크기로 재설정 (풀 메시지만, 크기가 다를 때만)
-        // RentReusable에서 이미 ReinitializeZmqMsg(bufferSize)가 호출됨
-        // actualSize != bufferSize인 경우에만 재초기화 필요
+        // 3. 실제 데이터 크기 설정
         if (msg._isFromPool && actualSize != msg._bufferSize)
         {
-            msg.SetActualDataSize(actualSize);
+            msg._actualDataSize = actualSize;
         }
 
         return msg;
@@ -407,9 +379,6 @@ public sealed class MessagePool
                 Interlocked.Increment(ref _poolMisses);
             Interlocked.Increment(ref _totalRents);
         }
-
-        // zmq_msg_t 초기화 (한 번만 호출)
-        result.ReinitializeZmqMsg(result._bufferSize);
 
         return result;
     }
@@ -583,18 +552,11 @@ public sealed class MessagePool
         {
             while (_pooledMessages[i].TryPop(out var msg))
             {
-                // zmq_msg_t 종료 (콜백이 풀 반환을 하지 않도록 플래그 설정)
+                // zmq_msg_t 종료
                 if (msg._initialized)
                 {
-                    Interlocked.Exchange(ref msg._callbackExecuted, 1);
                     Core.Native.LibZmq.MsgClosePtr(msg._msgPtr);
                     msg._initialized = false;
-                }
-
-                // GCHandle 해제 (zmq_msg_close 후에 해제해야 callback에서 안전)
-                if (msg._callbackHandle.IsAllocated)
-                {
-                    msg._callbackHandle.Free();
                 }
 
                 // 네이티브 메모리 해제
