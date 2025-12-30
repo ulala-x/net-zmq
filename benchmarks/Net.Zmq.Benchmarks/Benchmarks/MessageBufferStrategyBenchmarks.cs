@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using System.Buffers;
+using System.Runtime;
 using System.Runtime.InteropServices;
 
 namespace Net.Zmq.Benchmarks.Benchmarks;
@@ -41,6 +42,12 @@ public class MessageBufferStrategyBenchmarks
     [GlobalSetup]
     public void Setup()
     {
+        // GC 최적화: Batch 모드 (고처리량 우선, Gen2 GC 빈도 감소)
+        if (GCSettings.IsServerGC)
+        {
+            GCSettings.LatencyMode = GCLatencyMode.Batch;
+        }
+
         // Initialize buffers
         _identityBuffer = new byte[64];
 
