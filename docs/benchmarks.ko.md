@@ -9,7 +9,7 @@
 Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 위해 여러 수신 모드와 메시지 버퍼 전략을 제공합니다. 이 벤치마크 제품군은 다음을 평가합니다:
 
 - **수신 모드 (Receive Modes)**: PureBlocking, BlockingWithBatch, NonBlocking, Poller 기반 메시지 수신
-- **메시지 버퍼 전략 (Message Buffer Strategies)**: ByteArray, ArrayPool, Message, MessageZeroCopy 접근 방식
+- **메시지 버퍼 전략 (Message Buffer Strategies)**: ByteArray (기준), ArrayPool (권장), Message, MessageZeroCopy (특수 케이스용)
 - **메시지 크기 (Message Sizes)**: 64바이트(작음), 512바이트, 1024바이트, 65KB(큼)
 
 ### 테스트 환경
@@ -32,6 +32,34 @@ Net.Zmq는 다양한 성능 요구사항과 아키텍처 패턴을 수용하기 
 - **메시지 수 (Message Count)**: 테스트당 10,000 메시지
 - **전송 (Transport)**: tcp://127.0.0.1 (로컬호스트 루프백)
 - **패턴 (Pattern)**: ROUTER-to-ROUTER (수신 모드 테스트용)
+
+### GC 최적화 설정
+
+벤치마크는 최대 처리량을 위해 다음 GC 설정을 사용합니다:
+
+**프로젝트 설정 (csproj)**:
+```xml
+<ServerGarbageCollection>true</ServerGarbageCollection>
+```
+
+**런타임 설정 (코드)**:
+```csharp
+if (GCSettings.IsServerGC)
+{
+    GCSettings.LatencyMode = GCLatencyMode.Batch;
+}
+```
+
+**Server GC**:
+- 멀티스레드 환경에서 높은 처리량을 위해 설계됨
+- 각 프로세서에 별도의 힙을 할당하여 동시 수집 가능
+- Workstation GC보다 더 큰 힙 크기와 더 적은 GC 빈도
+
+**Batch Latency Mode**:
+- 최대 처리량을 위한 모드
+- Gen2 GC 동안 애플리케이션 일시 중지 허용
+- GC 빈도를 줄여 전체 처리량 향상
+- 대화형 애플리케이션에는 권장하지 않음 (지연 스파이크 가능)
 
 ## 수신 모드 벤치마크
 
@@ -255,15 +283,13 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 
 ### 각 전략의 작동 방식
 
-**ByteArray (`new byte[]`)**: 각 메시지에 대해 새 바이트 배열을 할당합니다. 간단하고 직관적이지만 메시지 크기와 빈도에 비례하는 가비지 컬렉션 압력을 생성합니다.
+**ByteArray (`new byte[]`)**: 각 메시지에 대해 새 바이트 배열을 할당합니다. 간단하고 직관적이지만 메시지 크기와 빈도에 비례하는 가비지 컬렉션 압력을 생성합니다. 성능 비교를 위한 기준선으로 사용됩니다.
 
-**ArrayPool (`ArrayPool<byte>.Shared`)**: 공유 풀에서 버퍼를 대여하고 사용 후 반환합니다. 메모리를 재사용하여 GC 할당을 줄이지만, 수동 반환 관리가 필요합니다.
+**ArrayPool (`ArrayPool<byte>.Shared`)**: 공유 풀에서 버퍼를 대여하고 사용 후 반환합니다. 메모리를 재사용하여 GC 할당을 대폭 줄이며, 작은 메시지에서 최고의 성능을 제공합니다. 수동 반환 관리가 필요하지만, 대부분의 경우 권장되는 전략입니다.
 
-**Message (`zmq_msg_t`)**: libzmq의 네이티브 메시지 구조를 사용하며 내부적으로 메모리를 관리합니다. .NET 래퍼는 필요에 따라 네이티브와 관리 메모리 간에 데이터를 마샬링합니다.
+**Message (`zmq_msg_t`)**: libzmq의 네이티브 메시지 구조를 사용하며 내부적으로 메모리를 관리합니다. .NET 래퍼는 필요에 따라 네이티브와 관리 메모리 간에 데이터를 마샬링합니다. 큰 메시지에서 ArrayPool과 비슷한 성능을 보입니다.
 
-**MessageZeroCopy (`Marshal.AllocHGlobal`)**: 언매니지드 메모리를 직접 할당하고 프리 콜백을 통해 libzmq에 소유권을 전달합니다. 제로카피 시맨틱을 제공하지만 신중한 라이프사이클 관리가 필요합니다.
-
-**MessagePool (`MessagePool.Shared`)**: 네이티브 메모리 버퍼를 풀링하여 재사용합니다. 스레드-로컬 캐시와 공유 풀을 2단계로 구성하여 높은 성능과 낮은 경합을 제공합니다. ZeroMQ의 free callback을 통해 자동으로 풀에 반환되므로 수동 반환이 필요 없습니다. **MessagePooled_WithReceivePool**은 송신과 수신 모두에서 풀을 사용하여 최소한의 메모리 할당을 달성합니다.
+**MessageZeroCopy (`Marshal.AllocHGlobal`)**: 언매니지드 메모리를 직접 할당하고 프리 콜백을 통해 libzmq에 소유권을 전달합니다. 대부분의 경우 Message보다 느리며, 이미 네이티브 메모리가 있는 특수한 경우(예: 다른 네이티브 라이브러리와 통합)에만 사용해야 합니다.
 
 ### 메시지 버퍼 벤치마크 메트릭 이해
 
@@ -288,8 +314,6 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 2.723 ms | 272.34 ns | 3.67M | 1.88 Gbps | - | 1.08 KB | 1.13x |
 | **Message** | 4.859 ms | 485.86 ns | 2.06M | 1.05 Gbps | - | 1406.58 KB | 2.02x |
 | **MessageZeroCopy** | 5.926 ms | 592.64 ns | 1.69M | 0.86 Gbps | - | 1406.58 KB | 2.46x |
-| **MessagePool** | 4.034 ms | 403.41 ns | 2.48M | 1.27 Gbps | - | 703.46 KB | 1.67x |
-| **MessagePool+RecvPool** | 2.855 ms | 285.45 ns | 3.50M | 1.79 Gbps | - | 2.74 KB | 1.18x |
 
 #### 512바이트 메시지
 
@@ -299,8 +323,6 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 5.355 ms | 535.52 ns | 1.87M | 7.65 Gbps | - | 1.52 KB | 0.94x |
 | **Message** | 6.258 ms | 625.85 ns | 1.60M | 6.54 Gbps | - | 1406.59 KB | 1.10x |
 | **MessageZeroCopy** | 6.886 ms | 688.59 ns | 1.45M | 5.95 Gbps | - | 1406.59 KB | 1.21x |
-| **MessagePool** | 5.376 ms | 537.58 ns | 1.86M | 7.62 Gbps | - | 703.46 KB | 0.94x |
-| **MessagePool+RecvPool** | 5.478 ms | 547.77 ns | 1.83M | 7.48 Gbps | - | 2.74 KB | 0.96x |
 
 #### 1024바이트 메시지
 
@@ -310,8 +332,6 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 7.820 ms | 782.02 ns | 1.28M | 10.48 Gbps | - | 2.04 KB | 0.91x |
 | **Message** | 8.495 ms | 849.46 ns | 1.18M | 9.64 Gbps | - | 1406.59 KB | 0.98x |
 | **MessageZeroCopy** | 10.678 ms | 1.07 μs | 936.47K | 7.67 Gbps | - | 1406.59 KB | 1.24x |
-| **MessagePool** | 7.616 ms | 761.57 ns | 1.31M | 10.76 Gbps | - | 703.46 KB | 0.88x |
-| **MessagePool+RecvPool** | 7.888 ms | 788.80 ns | 1.27M | 10.39 Gbps | - | 2.75 KB | 0.91x |
 
 #### 65KB 메시지
 
@@ -321,8 +341,6 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 160.17 ms | 16.02 μs | 62.44K | 3.81 GB/s | - | - | 65.29 KB | 0.94x |
 | **Message** | 175.25 ms | 17.52 μs | 57.06K | 3.48 GB/s | - | - | 1406.82 KB | 1.03x |
 | **MessageZeroCopy** | 164.90 ms | 16.49 μs | 60.64K | 3.70 GB/s | - | - | 1407.04 KB | 0.97x |
-| **MessagePool** | 169.32 ms | 16.93 μs | 59.06K | 3.60 GB/s | - | - | 703.90 KB | 1.00x |
-| **MessagePool+RecvPool** | 180.06 ms | 18.01 μs | 55.54K | 3.39 GB/s | - | - | 3.03 KB | 1.06x |
 
 #### 128KB 메시지
 
@@ -332,8 +350,6 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 342.74 ms | 34.27 μs | 29.18K | 3.56 GB/s | - | - | - | 129.48 KB | 0.27x |
 | **Message** | 375.43 ms | 37.54 μs | 26.64K | 3.25 GB/s | - | - | - | 1407.95 KB | 0.30x |
 | **MessageZeroCopy** | 361.82 ms | 36.18 μs | 27.64K | 3.37 GB/s | - | - | - | 1407.95 KB | 0.29x |
-| **MessagePool** | 367.43 ms | 36.74 μs | 27.22K | 3.32 GB/s | - | - | - | 704.83 KB | 0.29x |
-| **MessagePool+RecvPool** | 394.45 ms | 39.44 μs | 25.35K | 3.09 GB/s | - | - | - | 3.29 KB | 0.31x |
 
 #### 256KB 메시지
 
@@ -343,130 +359,135 @@ NonBlocking은 이러한 커널 지원이 부족하여 Thread.Sleep()으로 지�
 | **ArrayPool** | 719.49 ms | 71.95 μs | 13.90K | 3.39 GB/s | - | - | - | 257.70 KB | 0.29x |
 | **Message** | 698.36 ms | 69.84 μs | 14.32K | 3.50 GB/s | - | - | - | 1407.95 KB | 0.28x |
 | **MessageZeroCopy** | 716.22 ms | 71.62 μs | 13.96K | 3.41 GB/s | - | - | - | 1407.95 KB | 0.29x |
-| **MessagePool** | 708.05 ms | 70.80 μs | 14.12K | 3.45 GB/s | - | - | - | 704.83 KB | 0.28x |
-| **MessagePool+RecvPool** | 709.37 ms | 70.94 μs | 14.10K | 3.44 GB/s | - | - | - | 3.95 KB | 0.29x |
 
 ### 성능 및 GC 분석
 
-**작은 메시지 (64B)**: ByteArray (2.409 ms, 4.15M msg/sec, 1.00x)가 가장 빠르며, **MessagePool+RecvPool** (2.855 ms, 3.50M msg/sec, 1.18x)이 GC-프리로 근접한 성능을 보입니다. ByteArray는 GC 압력(3.91 Gen0, 1719 KB 할당)을 생성하는 반면, MessagePool+RecvPool은 단 2.74 KB만 할당합니다. Message (4.859 ms, 2.02x)와 MessageZeroCopy (5.926 ms, 2.46x)는 네이티브 interop 비용으로 상당한 오버헤드를 보입니다.
+**작은 메시지 (64B)**: ByteArray (2.409 ms, 4.15M msg/sec, 1.00x)가 가장 빠르지만 GC 압력(3.91 Gen0, 1719 KB 할당)을 생성합니다. **ArrayPool** (2.723 ms, 3.67M msg/sec, 1.13x)이 ByteArray와 거의 동등한 성능에 최소 메모리 할당(1.08 KB)을 제공하여 **작은 메시지에 권장**됩니다. Message (4.859 ms, 2.02x)와 MessageZeroCopy (5.926 ms, 2.46x)는 네이티브 interop 비용으로 상당한 오버헤드를 보이며 권장되지 않습니다.
 
-**중간 메시지 (512B)**: **ArrayPool** (5.355 ms, 0.94x)과 **MessagePool** (5.376 ms, 0.94x)이 거의 동일하게 가장 빠릅니다. MessagePool+RecvPool (5.478 ms, 0.96x)도 경쟁력 있는 성능에 최소 할당(2.74 KB)을 제공합니다. ByteArray (5.708 ms)는 GC 압력(23.44 Gen0, 10.5 MB 할당)이 증가합니다.
+**중간 메시지 (512B)**: **ArrayPool** (5.355 ms, 0.94x)이 가장 빠르며 ByteArray (5.708 ms, 1.00x)보다 6% 빠릅니다. ArrayPool은 GC 프리(0 Gen0)로 최소 할당(1.52 KB)을 달성하는 반면, ByteArray는 GC 압력(23.44 Gen0, 10.5 MB 할당)이 증가합니다. Message (6.258 ms, 1.10x)와 MessageZeroCopy (6.886 ms, 1.21x)는 더 느립니다.
 
-**중대형 메시지 (1KB)**: **MessagePool** (7.616 ms, 0.88x)이 가장 빠르며, ArrayPool (7.820 ms, 0.91x)과 MessagePool+RecvPool (7.888 ms, 0.91x)이 뒤따릅니다. MessagePool은 네이티브 메모리 재사용으로 ArrayPool보다 3% 빠른 성능과 함께 GC-프리를 달성합니다.
+**중대형 메시지 (1KB)**: **ArrayPool** (7.820 ms, 0.91x)이 가장 빠르며 ByteArray (8.637 ms, 1.00x)보다 9% 빠릅니다. Message (8.495 ms, 0.98x)도 경쟁력 있는 성능을 보입니다. MessageZeroCopy (10.678 ms, 1.24x)는 Message보다 24% 느려 권장되지 않습니다.
 
-**큰 메시지 (65KB)**: **ArrayPool** (160.17 ms, 0.94x)이 가장 빠르며, MessageZeroCopy (164.90 ms, 0.97x)와 MessagePool (169.32 ms, 1.00x)이 비슷한 성능을 보입니다. ByteArray (170.14 ms)는 대규모 GC 압력(3333 Gen0, 1.25 GB 할당)을 트리거합니다. MessagePool+RecvPool (180.06 ms, 1.06x)은 약간 느리지만 가장 적은 메모리(3.03 KB)를 할당합니다.
+**큰 메시지 (65KB)**: **ArrayPool** (160.17 ms, 0.94x)이 가장 빠르며 ByteArray (170.14 ms, 1.00x)보다 6% 빠릅니다. MessageZeroCopy (164.90 ms, 0.97x)와 Message (175.25 ms, 1.03x)도 비슷한 성능을 보입니다. ByteArray는 대규모 GC 압력(3333 Gen0, 1.25 GB 할당)을 트리거합니다.
 
-**매우 큰 메시지 (128KB)**: ByteArray가 극심한 GC 압력(Gen0/1/2 각 51,000번, 2.5GB 할당)으로 1,259ms가 걸립니다. **ArrayPool** (342.74 ms, 0.27x)이 가장 빠르며 3.7배 빠릅니다. MessageZeroCopy (361.82 ms, 0.29x), MessagePool (367.43 ms, 0.29x), Message (375.43 ms, 0.30x)도 모두 3배 이상 빠릅니다. MessagePool+RecvPool (394.45 ms, 0.31x)은 가장 적은 메모리(3.29 KB)를 할당합니다.
+**매우 큰 메시지 (128KB)**: ByteArray가 극심한 GC 압력(Gen0/1/2 각 51,000번, 2.5GB 할당)으로 1,259ms가 걸립니다. **ArrayPool** (342.74 ms, 0.27x)이 가장 빠르며 **3.7배 빠릅니다**. MessageZeroCopy (361.82 ms, 0.29x)와 Message (375.43 ms, 0.30x)도 모두 3배 이상 빠르지만 ArrayPool보다는 느립니다.
 
-**초대형 메시지 (256KB)**: ByteArray는 GC 압력이 더 심해져(Gen0/1/2 각 100,000번, 5GB 할당) 2,485ms가 걸립니다. **Message** (698.36 ms, 0.28x)가 가장 빠르며 3.6배 빠릅니다. MessagePool (708.05 ms, 0.28x), MessagePool+RecvPool (709.37 ms, 0.29x), MessageZeroCopy (716.22 ms, 0.29x), ArrayPool (719.49 ms, 0.29x) 모두 유사한 성능을 보입니다.
+**초대형 메시지 (256KB)**: ByteArray는 GC 압력이 더 심해져(Gen0/1/2 각 100,000번, 5GB 할당) 2,485ms가 걸립니다. **Message** (698.36 ms, 0.28x)가 가장 빠르며 **3.6배 빠릅니다**. ArrayPool (719.49 ms, 0.29x), MessageZeroCopy (716.22 ms, 0.29x) 모두 유사한 성능을 보이며 Message와 근접합니다.
 
-**MessagePool의 장점**:
-- **자동 반환**: ZeroMQ free callback을 통해 송신 완료 시 자동으로 풀에 반환되어 수동 관리 불필요
-- **스레드-로컬 캐시**: 2단계 풀링(스레드-로컬 + 공유 풀)으로 높은 성능과 낮은 경합
-- **1KB 이상에서 최고 성능**: 중간 크기 메시지에서 ArrayPool보다 빠름
-- **최소 메모리 할당**: MessagePool+RecvPool 사용 시 모든 크기에서 3KB 미만 할당
+**Large Object Heap (LOH) 영향**: .NET에서 85KB 이상 객체는 LOH에 할당되어 GC 비용이 급증합니다. 128KB/256KB에서 ByteArray의 성능이 급격히 나빠지는 이유입니다. ArrayPool, Message, MessageZeroCopy 같은 전략은 이 문제를 완전히 회피합니다.
 
-**Large Object Heap (LOH) 영향**: .NET에서 85KB 이상 객체는 LOH에 할당되어 GC 비용이 급증. 128KB/256KB에서 ByteArray의 성능이 급격히 나빠지는 이유. MessagePool을 포함한 네이티브 전략은 이 문제를 완전히 회피.
+**GC 패턴**: ArrayPool, Message, MessageZeroCopy는 모든 메시지 크기에서 제로 GC 컬렉션을 유지합니다. ByteArray는 기하급수적 GC 압력 증가를 나타냅니다: 64B에서 3.91 Gen0 → 512B에서 23.44 Gen0 → 1KB에서 46.88 Gen0 → 65KB에서 3333 Gen0 → 128KB에서 51,000 Gen0/1/2 → 256KB에서 100,000 Gen0/1/2.
 
-**GC 패턴 전환**: ArrayPool, MessagePool 및 네이티브 전략은 모든 메시지 크기에서 제로 GC 컬렉션을 유지합니다. ByteArray는 기하급수적 GC 압력 증가를 나타냅니다: 64B에서 3.91 Gen0 → 512B에서 23.44 Gen0 → 1KB에서 46.88 Gen0 → 65KB에서 3333 Gen0 → 128KB에서 51,000 Gen0/1/2 → 256KB에서 100,000 Gen0/1/2.
-
-**메모리 할당**: MessagePool+RecvPool이 가장 효율적(모든 크기에서 2.74-3.95 KB 총 할당)입니다. ArrayPool (1.08-258 KB)과 MessagePool (703-705 KB)도 ByteArray 대비 99% 이상 감소를 보여줍니다.
+**메모리 할당**: ArrayPool이 가장 효율적(1.08-258 KB)이며, Message도 일관되게 낮은 할당(~1407 KB)을 보입니다. ByteArray는 메시지 크기에 비례하여 할당이 증가합니다(64B에서 1.7MB → 256KB에서 5GB).
 
 ### 메시지 버퍼 전략 선택 고려사항
 
 메시지 버퍼 전략을 선택할 때 다음을 고려하세요:
 
 **메시지 크기 기반 권장사항**:
-- **작은 메시지 (≤512B)**: **`ArrayPool<byte>.Shared`** 또는 **`MessagePool`** - ByteArray와 동등한 성능, GC 프리
-- **중간 메시지 (1KB)**: **`MessagePool`** - ArrayPool보다 3% 빠르고 자동 반환
-- **큰 메시지 (≥65KB)**: **`ArrayPool`** 또는 **`MessagePool`** - 유사한 성능, GC 프리
-- **매우 큰 메시지 (≥128KB)**: **`ArrayPool`** 또는 **`MessagePool`** - ByteArray 대비 3배 이상 빠름
-- **최소 메모리 할당 필요시**: **`MessagePool+RecvPool`** - 모든 크기에서 3KB 미만 할당
+- **작은 메시지 (≤1KB)**: **`ArrayPool<byte>.Shared`** 권장 - 최고 성능(6-13% 빠름), 최소 GC, 최소 메모리 할당
+- **큰 메시지 (≥64KB)**: **`ArrayPool`** 또는 **`Message`** - 거의 동등한 성능, GC 프리
+- **매우 큰 메시지 (≥128KB)**: **`ArrayPool`** 또는 **`Message`** - ByteArray 대비 3.5배 이상 빠름, LOH 회피
+- **네이티브 메모리 통합**: **`MessageZeroCopy`** - 이미 네이티브 메모리가 있는 특수한 경우에만 사용
 
 **단일 전략 권장 (One-Size-Fits-All)**:
 
-메시지 크기가 다양하거나 예측하기 어려운 경우, **`MessagePool`을 권장**합니다:
+메시지 크기가 다양하거나 예측하기 어려운 경우, **`ArrayPool<byte>.Shared`를 권장**합니다:
 
-1. **일관된 성능**: 모든 메시지 크기에서 예측 가능한 성능 제공
-2. **자동 반환**: ZeroMQ free callback을 통해 자동으로 풀에 반환, 수동 관리 불필요
-3. **GC 프리**: 네이티브 메모리 풀링으로 GC 압력 제로
-4. **스레드-로컬 캐시**: 2단계 풀링으로 높은 성능과 낮은 경합
-5. **LOH 회피**: 128KB+ 메시지에서 .NET LOH 문제 완전 회피
-6. **충분한 소형 메시지 성능**: 64B에서도 초당 248만 메시지 처리 가능
+1. **일관된 최고 성능**: 작은 메시지에서 매우 큰 메시지까지 최고 또는 거의 최고 성능 제공
+2. **GC 프리**: 모든 메시지 크기에서 GC 압력 제로
+3. **최소 메모리 할당**: 1KB~260KB 범위의 낮은 메모리 할당
+4. **LOH 회피**: 128KB+ 메시지에서 .NET LOH 문제 완전 회피
+5. **표준 .NET API**: ArrayPool은 .NET의 표준 API로 다른 라이브러리와 잘 통합됨
 
-ArrayPool은 작은 메시지에서 약간 빠르지만 수동 반환 관리가 필요합니다. MessagePool은 ArrayPool과 비슷한 성능에 자동 반환을 제공하므로, 단일 전략을 선택해야 한다면 **MessagePool이 더 안전한 선택**입니다.
+ArrayPool은 수동 반환 관리가 필요하지만, 대부분의 경우 최고의 성능과 최소 메모리 사용을 제공합니다.
 
-**ArrayPool 사용 패턴**:
+**ArrayPool 사용 패턴** (권장):
 ```csharp
 using Net.Zmq;
 using System.Buffers;
 
-// Rent buffer from pool
+// 송신: 풀에서 버퍼를 빌려서 전송
 var buffer = ArrayPool<byte>.Shared.Rent(size);
 try
 {
-    // Fill buffer with data
+    // 데이터를 버퍼에 복사
+    sourceData.CopyTo(buffer.AsSpan(0, size));
     socket.Send(buffer.AsSpan(0, size));
 }
 finally
 {
+    // 사용 후 풀에 반환
     ArrayPool<byte>.Shared.Return(buffer);
+}
+
+// 수신: 풀에서 버퍼를 빌려서 수신
+var recvBuffer = ArrayPool<byte>.Shared.Rent(expectedSize);
+try
+{
+    var received = socket.Recv(recvBuffer);
+    // 데이터 처리...
+    ProcessData(recvBuffer.AsSpan(0, received));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(recvBuffer);
 }
 ```
 
-**MessagePool 사용 패턴** (권장):
+**Message 사용 패턴**:
 ```csharp
 using Net.Zmq;
 
-// 송신: 풀에서 메시지를 빌려서 전송 (자동 반환)
-var sendMsg = MessagePool.Shared.Rent(dataSize);
+// 송신: Message 사용
+using var sendMsg = new Message(dataSize);
 sourceData.CopyTo(sendMsg.Data);
-socket.Send(sendMsg);  // ZeroMQ free callback을 통해 자동 반환
+socket.Send(sendMsg);
 
-// 수신: 풀에서 메시지를 빌려서 수신
-var recvMsg = MessagePool.Shared.Rent(expectedSize);
-socket.Recv(recvMsg, expectedSize);
+// 수신: Message 사용
+using var recvMsg = new Message();
+socket.Recv(recvMsg);
 // 데이터 처리...
-recvMsg.Dispose();  // 풀에 반환
+ProcessData(recvMsg.Data);
 ```
 
-**MessageZeroCopy 사용 패턴** (특수한 경우):
+**MessageZeroCopy 사용 패턴** (이미 네이티브 메모리가 있는 특수한 경우에만):
 ```csharp
 using Net.Zmq;
 using System.Runtime.InteropServices;
 
-// Allocate unmanaged memory
-nint nativePtr = Marshal.AllocHGlobal(dataSize);
-unsafe
-{
-    var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
-    sourceData.CopyTo(nativeSpan);
-}
+// 네이티브 메모리가 이미 있는 경우에만 사용
+// 예: 다른 네이티브 라이브러리에서 받은 메모리
+nint nativePtr = GetNativeMemoryFromSomewhereElse();
 
-// Transfer ownership to libzmq
+// libzmq에 소유권 전달 (제로카피)
 using var message = new Message(nativePtr, dataSize, ptr =>
 {
-    Marshal.FreeHGlobal(ptr); // Called when libzmq is done
+    // libzmq가 완료되면 호출됨
+    FreeNativeMemory(ptr);
 });
 
 socket.Send(message);
+
+// 주의: 일반적인 경우 ArrayPool이나 Message가 더 빠르고 간단합니다
 ```
 
 **GC 민감도**:
-- GC 일시 중지에 민감한 애플리케이션은 ArrayPool(작은 메시지) 또는 Message(큰 메시지)를 선호해야 함
-- 드문 메시징이나 작은 메시지가 있는 애플리케이션은 ByteArray가 허용 가능할 수 있음
-- 고처리량 애플리케이션은 GC 프리 전략(ArrayPool, Message)의 이점
+- GC 일시 중지에 민감한 고처리량 애플리케이션은 **ArrayPool** 권장 (모든 크기에서 GC 프리)
+- 드문 메시징이나 프로토타이핑 단계에서는 ByteArray가 간단하고 허용 가능
+- 실시간 또는 지연 시간이 중요한 애플리케이션은 GC 프리 전략(ArrayPool, Message) 필수
 
 **코드 복잡성**:
-- **ByteArray**: 자동 메모리 관리로 가장 간단한 구현
-- **ArrayPool**: 명시적 Rent/Return 호출 및 버퍼 라이프사이클 추적 필요
-- **Message**: 적당한 복잡도로 네이티브 통합
-- **MessageZeroCopy**: 언매니지드 메모리 관리 및 프리 콜백 필요
+- **ByteArray**: 자동 메모리 관리로 가장 간단하지만, GC 압력 발생
+- **ArrayPool**: 명시적 Rent/Return 호출 필요하지만, 최고의 성능/메모리 효율성 제공
+- **Message**: using 패턴으로 간단하게 사용 가능, 큰 메시지에서 ArrayPool과 비슷한 성능
+- **MessageZeroCopy**: 복잡한 메모리 관리 필요, 대부분의 경우 Message보다 느림 (특수한 경우에만 사용)
 
-**성능 트레이드오프**:
-- **작은 메시지 (≤ 512B)**: 관리 전략(ByteArray, ArrayPool)이 더 낮은 오버헤드 보유
-- **큰 메시지 (≥ 512B)**: Message가 최적의 성능 제공
-- **일관성**: GC 프리 전략(ArrayPool, Message)이 더 예측 가능한 타이밍 제공
+**성능 트레이드오프 요약**:
+- **작은 메시지 (≤ 1KB)**: ArrayPool이 최고 성능 (ByteArray 대비 6-13% 빠름)
+- **큰 메시지 (≥ 64KB)**: ArrayPool과 Message가 거의 동등, 둘 다 ByteArray 대비 크게 빠름
+- **매우 큰 메시지 (≥ 128KB)**: ArrayPool과 Message가 ByteArray 대비 3.5배 이상 빠름
+- **일관성**: ArrayPool은 모든 크기에서 최고 또는 거의 최고 성능 제공
 
 ## 벤치마크 실행
 

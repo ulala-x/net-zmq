@@ -9,7 +9,7 @@ This document contains comprehensive performance benchmark results for Net.Zmq, 
 Net.Zmq provides multiple receive modes and memory strategies to accommodate different performance requirements and architectural patterns. This benchmark suite evaluates:
 
 - **Receive Modes**: PureBlocking, BlockingWithBatch, NonBlocking, and Poller-based message reception
-- **Message Buffer Strategies**: ByteArray, ArrayPool, Message, MessageZeroCopy, and MessagePool approaches
+- **Message Buffer Strategies**: ByteArray (baseline), ArrayPool (recommended), Message, MessageZeroCopy (special cases only)
 - **Message Sizes**: 64 bytes (small), 512 bytes, 1024 bytes, and 65KB (large)
 
 ### Test Environment
@@ -32,6 +32,34 @@ Net.Zmq provides multiple receive modes and memory strategies to accommodate dif
 - **Message Count**: 10,000 messages per test
 - **Transport**: tcp://127.0.0.1 (localhost loopback)
 - **Pattern**: ROUTER-to-ROUTER (for receive mode tests)
+
+### GC Optimization Settings
+
+The benchmarks use the following GC settings for maximum throughput:
+
+**Project Configuration (csproj)**:
+```xml
+<ServerGarbageCollection>true</ServerGarbageCollection>
+```
+
+**Runtime Configuration (code)**:
+```csharp
+if (GCSettings.IsServerGC)
+{
+    GCSettings.LatencyMode = GCLatencyMode.Batch;
+}
+```
+
+**Server GC**:
+- Designed for high throughput in multi-threaded environments
+- Allocates separate heaps for each processor for concurrent collection
+- Larger heap sizes and less frequent GC compared to Workstation GC
+
+**Batch Latency Mode**:
+- Mode optimized for maximum throughput
+- Allows application pauses during Gen2 GC
+- Reduces GC frequency to improve overall throughput
+- Not recommended for interactive applications (latency spikes possible)
 
 ## Receive Mode Benchmarks
 
@@ -254,15 +282,13 @@ When choosing a receive mode, consider:
 
 ### How Each Strategy Works
 
-**ByteArray (`new byte[]`)**: Allocates a new byte array for each message. Simple and straightforward, but creates garbage collection pressure proportional to message size and frequency.
+**ByteArray (`new byte[]`)**: Allocates a new byte array for each message. Simple and straightforward, but creates garbage collection pressure proportional to message size and frequency. Used as a baseline for performance comparisons.
 
-**ArrayPool (`ArrayPool<byte>.Shared`)**: Rents buffers from a shared pool and returns them after use. Reduces GC allocations by reusing memory, though requires manual return management.
+**ArrayPool (`ArrayPool<byte>.Shared`)**: Rents buffers from a shared pool and returns them after use. Significantly reduces GC allocations by reusing memory, providing the best performance for small messages. Requires manual return management, but is the recommended strategy for most cases.
 
-**Message (`zmq_msg_t`)**: Uses libzmq's native message structure, which manages memory internally. The .NET wrapper marshals data between native and managed memory as needed.
+**Message (`zmq_msg_t`)**: Uses libzmq's native message structure, which manages memory internally. The .NET wrapper marshals data between native and managed memory as needed. Shows comparable performance to ArrayPool for large messages.
 
-**MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. Provides zero-copy semantics but requires careful lifecycle management.
-
-**MessagePool (`MessagePool.Shared`)**: Pools native memory buffers for reuse. Features a 2-tier caching system with thread-local cache and shared pool for high performance and low contention. Messages are automatically returned to the pool via ZeroMQ's free callback after send completion, eliminating manual return management. **MessagePool+RecvPool** uses pooling for both send and receive operations, achieving minimal memory allocation.
+**MessageZeroCopy (`Marshal.AllocHGlobal`)**: Allocates unmanaged memory directly and transfers ownership to libzmq via a free callback. In most cases, it is slower than Message. Should only be used in special cases when native memory already exists (e.g., integration with other native libraries).
 
 ### Understanding Message Buffer Benchmark Metrics
 
@@ -287,8 +313,6 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 2.723 ms | 272.34 ns | 3.67M | 1.88 Gbps | - | 1.08 KB | 1.13x |
 | **Message** | 4.859 ms | 485.86 ns | 2.06M | 1.05 Gbps | - | 1406.58 KB | 2.02x |
 | **MessageZeroCopy** | 5.926 ms | 592.64 ns | 1.69M | 0.86 Gbps | - | 1406.58 KB | 2.46x |
-| **MessagePool** | 4.034 ms | 403.41 ns | 2.48M | 1.27 Gbps | - | 703.46 KB | 1.67x |
-| **MessagePool+RecvPool** | 2.855 ms | 285.45 ns | 3.50M | 1.79 Gbps | - | 2.74 KB | 1.18x |
 
 #### 512-Byte Messages
 
@@ -298,8 +322,6 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 5.355 ms | 535.52 ns | 1.87M | 7.65 Gbps | - | 1.52 KB | 0.94x |
 | **Message** | 6.258 ms | 625.85 ns | 1.60M | 6.54 Gbps | - | 1406.59 KB | 1.10x |
 | **MessageZeroCopy** | 6.886 ms | 688.59 ns | 1.45M | 5.95 Gbps | - | 1406.59 KB | 1.21x |
-| **MessagePool** | 5.376 ms | 537.58 ns | 1.86M | 7.62 Gbps | - | 703.46 KB | 0.94x |
-| **MessagePool+RecvPool** | 5.478 ms | 547.77 ns | 1.83M | 7.48 Gbps | - | 2.74 KB | 0.96x |
 
 #### 1024-Byte Messages
 
@@ -309,8 +331,6 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 7.820 ms | 782.02 ns | 1.28M | 10.48 Gbps | - | 2.04 KB | 0.91x |
 | **Message** | 8.495 ms | 849.46 ns | 1.18M | 9.64 Gbps | - | 1406.59 KB | 0.98x |
 | **MessageZeroCopy** | 10.678 ms | 1.07 μs | 936.47K | 7.67 Gbps | - | 1406.59 KB | 1.24x |
-| **MessagePool** | 7.616 ms | 761.57 ns | 1.31M | 10.76 Gbps | - | 703.46 KB | 0.88x |
-| **MessagePool+RecvPool** | 7.888 ms | 788.80 ns | 1.27M | 10.39 Gbps | - | 2.75 KB | 0.91x |
 
 #### 65KB Messages
 
@@ -320,8 +340,6 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 160.17 ms | 16.02 μs | 62.44K | 3.81 GB/s | - | - | 65.29 KB | 0.94x |
 | **Message** | 175.25 ms | 17.52 μs | 57.06K | 3.48 GB/s | - | - | 1406.82 KB | 1.03x |
 | **MessageZeroCopy** | 164.90 ms | 16.49 μs | 60.64K | 3.70 GB/s | - | - | 1407.04 KB | 0.97x |
-| **MessagePool** | 169.32 ms | 16.93 μs | 59.06K | 3.60 GB/s | - | - | 703.90 KB | 1.00x |
-| **MessagePool+RecvPool** | 180.06 ms | 18.01 μs | 55.54K | 3.39 GB/s | - | - | 3.03 KB | 1.06x |
 
 #### 128KB Messages
 
@@ -331,8 +349,6 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 342.74 ms | 34.27 μs | 29.18K | 3.56 GB/s | - | - | - | 129.48 KB | 0.27x |
 | **Message** | 375.43 ms | 37.54 μs | 26.64K | 3.25 GB/s | - | - | - | 1407.95 KB | 0.30x |
 | **MessageZeroCopy** | 361.82 ms | 36.18 μs | 27.64K | 3.37 GB/s | - | - | - | 1407.95 KB | 0.29x |
-| **MessagePool** | 367.43 ms | 36.74 μs | 27.22K | 3.32 GB/s | - | - | - | 704.83 KB | 0.29x |
-| **MessagePool+RecvPool** | 394.45 ms | 39.44 μs | 25.35K | 3.09 GB/s | - | - | - | 3.29 KB | 0.31x |
 
 #### 256KB Messages
 
@@ -342,130 +358,135 @@ All tests use PureBlocking mode for reception.
 | **ArrayPool** | 719.49 ms | 71.95 μs | 13.90K | 3.39 GB/s | - | - | - | 257.70 KB | 0.29x |
 | **Message** | 698.36 ms | 69.84 μs | 14.32K | 3.50 GB/s | - | - | - | 1407.95 KB | 0.28x |
 | **MessageZeroCopy** | 716.22 ms | 71.62 μs | 13.96K | 3.41 GB/s | - | - | - | 1407.95 KB | 0.29x |
-| **MessagePool** | 708.05 ms | 70.80 μs | 14.12K | 3.45 GB/s | - | - | - | 704.83 KB | 0.28x |
-| **MessagePool+RecvPool** | 709.37 ms | 70.94 μs | 14.10K | 3.44 GB/s | - | - | - | 3.95 KB | 0.29x |
 
 ### Performance and GC Analysis
 
-**Small Messages (64B)**: ByteArray (2.409 ms, 4.15M msg/sec, 1.00x) is fastest but generates GC pressure (3.91 Gen0, 1719 KB allocated). **MessagePool+RecvPool** (2.855 ms, 3.50M msg/sec, 1.18x) provides close performance with GC-free operation and only 2.74 KB allocation. Message (4.859 ms, 2.02x) and MessageZeroCopy (5.926 ms, 2.46x) show substantial overhead due to native interop costs.
+**Small Messages (64B)**: ByteArray (2.409 ms, 4.15M msg/sec, 1.00x) is fastest but generates GC pressure (3.91 Gen0, 1719 KB allocated). **ArrayPool** (2.723 ms, 3.67M msg/sec, 1.13x) provides nearly equal performance with minimal memory allocation (1.08 KB) and is **recommended for small messages**. Message (4.859 ms, 2.02x) and MessageZeroCopy (5.926 ms, 2.46x) show substantial overhead due to native interop costs and are not recommended.
 
-**Medium Messages (512B)**: **ArrayPool** (5.355 ms, 0.94x) and **MessagePool** (5.376 ms, 0.94x) tie as fastest with nearly identical performance. MessagePool+RecvPool (5.478 ms, 0.96x) offers competitive performance with minimal allocation (2.74 KB). ByteArray (5.708 ms) shows increasing GC pressure (23.44 Gen0, 10.5 MB allocated).
+**Medium Messages (512B)**: **ArrayPool** (5.355 ms, 0.94x) is fastest, 6% faster than ByteArray (5.708 ms, 1.00x). ArrayPool is GC-free (0 Gen0) with minimal allocation (1.52 KB), while ByteArray shows increasing GC pressure (23.44 Gen0, 10.5 MB allocated). Message (6.258 ms, 1.10x) and MessageZeroCopy (6.886 ms, 1.21x) are slower.
 
-**Medium-Large Messages (1KB)**: **MessagePool** (7.616 ms, 0.88x) is fastest, followed by ArrayPool (7.820 ms, 0.91x) and MessagePool+RecvPool (7.888 ms, 0.91x). MessagePool achieves 3% faster performance than ArrayPool while providing automatic return via ZeroMQ callbacks. ByteArray (8.637 ms, 1.00x) shows substantial GC pressure (46.88 Gen0, 20 MB allocated).
+**Medium-Large Messages (1KB)**: **ArrayPool** (7.820 ms, 0.91x) is fastest, 9% faster than ByteArray (8.637 ms, 1.00x). Message (8.495 ms, 0.98x) also shows competitive performance. MessageZeroCopy (10.678 ms, 1.24x) is 24% slower than Message and is not recommended. ByteArray shows substantial GC pressure (46.88 Gen0, 20 MB allocated).
 
-**Large Messages (65KB)**: **ArrayPool** (160.17 ms, 0.94x) is fastest, followed by MessageZeroCopy (164.90 ms, 0.97x) and MessagePool (169.32 ms, 1.00x). ByteArray (170.14 ms) triggers massive GC pressure (3333 Gen0, 1.25 GB allocated). MessagePool+RecvPool (180.06 ms, 1.06x) is slightly slower but allocates the least memory (3.03 KB).
+**Large Messages (65KB)**: **ArrayPool** (160.17 ms, 0.94x) is fastest, 6% faster than ByteArray (170.14 ms, 1.00x). MessageZeroCopy (164.90 ms, 0.97x) and Message (175.25 ms, 1.03x) show similar performance. ByteArray triggers massive GC pressure (3333 Gen0, 1.25 GB allocated).
 
-**Very Large Messages (128KB)**: ByteArray suffers extreme GC pressure (51,000 Gen0/1/2 collections each, 2.5 GB allocated) taking 1,259 ms. **ArrayPool** (342.74 ms, 0.27x) is fastest - **3.7x faster**. MessageZeroCopy (361.82 ms, 0.29x), MessagePool (367.43 ms, 0.29x), and Message (375.43 ms, 0.30x) all perform over 3x faster. MessagePool+RecvPool (394.45 ms, 0.31x) allocates the least memory (3.29 KB).
+**Very Large Messages (128KB)**: ByteArray suffers extreme GC pressure (51,000 Gen0/1/2 collections each, 2.5 GB allocated) taking 1,259 ms. **ArrayPool** (342.74 ms, 0.27x) is fastest - **3.7x faster**. MessageZeroCopy (361.82 ms, 0.29x) and Message (375.43 ms, 0.30x) both perform over 3x faster, but ArrayPool is still faster.
 
-**Extra Large Messages (256KB)**: ByteArray's GC pressure intensifies (100,000 Gen0/1/2 collections each, 5 GB allocated) taking 2,485 ms. **Message** (698.36 ms, 0.28x) is fastest - **3.6x faster**. MessagePool (708.05 ms, 0.28x), MessagePool+RecvPool (709.37 ms, 0.29x), MessageZeroCopy (716.22 ms, 0.29x), and ArrayPool (719.49 ms, 0.29x) all show similar performance.
+**Extra Large Messages (256KB)**: ByteArray's GC pressure intensifies (100,000 Gen0/1/2 collections each, 5 GB allocated) taking 2,485 ms. **Message** (698.36 ms, 0.28x) is fastest - **3.6x faster**. ArrayPool (719.49 ms, 0.29x) and MessageZeroCopy (716.22 ms, 0.29x) show similar performance, all near Message.
 
-**MessagePool Advantages**:
-- **Automatic Return**: Messages are automatically returned to pool via ZeroMQ free callback after send completion, eliminating manual management
-- **Thread-Local Cache**: 2-tier pooling (thread-local + shared pool) provides high performance with low contention
-- **Best at 1KB**: Fastest strategy for medium-sized messages, 3% faster than ArrayPool
-- **Minimal Memory Allocation**: MessagePool+RecvPool allocates less than 3KB across all sizes
+**Large Object Heap (LOH) Impact**: In .NET, objects ≥85KB are allocated on the LOH, causing GC costs to skyrocket. This explains ByteArray's dramatic performance degradation at 128KB/256KB. ArrayPool, Message, and MessageZeroCopy strategies completely avoid this issue.
 
-**Large Object Heap (LOH) Impact**: In .NET, objects ≥85KB are allocated on the LOH, causing GC costs to skyrocket. This explains ByteArray's dramatic performance degradation at 128KB/256KB. MessagePool and other native strategies completely avoid this issue.
+**GC Pattern**: ArrayPool, Message, and MessageZeroCopy maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 3.91 Gen0 at 64B → 23.44 Gen0 at 512B → 46.88 Gen0 at 1KB → 3333 Gen0 at 65KB → 51,000 Gen0/1/2 at 128KB → 100,000 Gen0/1/2 at 256KB.
 
-**GC Pattern Transition**: ArrayPool, MessagePool, and native strategies maintain zero GC collections across all message sizes. ByteArray shows exponential GC pressure growth: 3.91 Gen0 at 64B → 23.44 Gen0 at 512B → 46.88 Gen0 at 1KB → 3333 Gen0 at 65KB → 51,000 Gen0/1/2 at 128KB → 100,000 Gen0/1/2 at 256KB.
-
-**Memory Allocation**: MessagePool+RecvPool is most efficient (2.74-3.95 KB total allocation across all sizes). ArrayPool (1.08-258 KB) and MessagePool (703-705 KB) also show 99%+ reduction vs ByteArray.
+**Memory Allocation**: ArrayPool is most efficient (1.08-258 KB total allocation), while Message also shows consistently low allocation (~1407 KB). ByteArray's allocation grows proportionally with message size (1.7MB at 64B → 5GB at 256KB).
 
 ### Message Buffer Strategy Selection Considerations
 
 When choosing a message buffer strategy, consider:
 
 **Message Size Based Recommendations**:
-- **Small messages (≤512B)**: **`ArrayPool<byte>.Shared`** or **`MessagePool`** - ByteArray-equivalent performance, GC-free
-- **Medium messages (1KB)**: **`MessagePool`** - 3% faster than ArrayPool with automatic return
-- **Large messages (≥65KB)**: **`ArrayPool`** or **`MessagePool`** - similar performance, GC-free
-- **Very large messages (≥128KB)**: **`ArrayPool`** or **`MessagePool`** - 3x+ faster than ByteArray
-- **Minimal memory allocation needed**: **`MessagePool+RecvPool`** - less than 3KB allocation across all sizes
+- **Small messages (≤1KB)**: **`ArrayPool<byte>.Shared`** recommended - best performance (6-13% faster), minimal GC, minimal memory allocation
+- **Large messages (≥64KB)**: **`ArrayPool`** or **`Message`** - nearly equal performance, GC-free
+- **Very large messages (≥128KB)**: **`ArrayPool`** or **`Message`** - 3.5x+ faster than ByteArray, LOH avoidance
+- **Native memory integration**: **`MessageZeroCopy`** - only for special cases when native memory already exists
 
 **One-Size-Fits-All Recommendation**:
 
-If message sizes vary or are unpredictable, we recommend **`MessagePool`**:
+If message sizes vary or are unpredictable, we recommend **`ArrayPool<byte>.Shared`**:
 
-1. **Consistent Performance**: Provides predictable performance across all message sizes
-2. **Automatic Return**: Messages are automatically returned to pool via ZeroMQ free callback, eliminating manual management
-3. **GC-Free**: Zero GC pressure using native memory pooling
-4. **Thread-Local Cache**: 2-tier pooling provides high performance with low contention
-5. **LOH Avoidance**: Completely bypasses .NET LOH issues for 128KB+ messages
-6. **Adequate Small Message Performance**: Even at 64B, processes 2.48M messages/sec
+1. **Consistent Best Performance**: Provides best or near-best performance from small to very large messages
+2. **GC-Free**: Zero GC pressure across all message sizes
+3. **Minimal Memory Allocation**: Low memory allocation in the 1KB~260KB range
+4. **LOH Avoidance**: Completely bypasses .NET LOH issues for 128KB+ messages
+5. **Standard .NET API**: ArrayPool is a standard .NET API that integrates well with other libraries
 
-ArrayPool is slightly faster for small messages but requires manual return management. MessagePool provides similar performance with automatic return, making **MessagePool the safer choice** for a single strategy approach.
+ArrayPool requires manual return management, but provides the best performance and minimal memory usage in most cases.
 
-**ArrayPool Usage Pattern**:
+**ArrayPool Usage Pattern** (Recommended):
 ```csharp
 using Net.Zmq;
 using System.Buffers;
 
-// Rent buffer from pool
+// Send: Rent buffer from pool and send
 var buffer = ArrayPool<byte>.Shared.Rent(size);
 try
 {
-    // Fill buffer with data
+    // Copy data to buffer
+    sourceData.CopyTo(buffer.AsSpan(0, size));
     socket.Send(buffer.AsSpan(0, size));
 }
 finally
 {
+    // Return to pool after use
     ArrayPool<byte>.Shared.Return(buffer);
+}
+
+// Receive: Rent buffer from pool and receive
+var recvBuffer = ArrayPool<byte>.Shared.Rent(expectedSize);
+try
+{
+    var received = socket.Recv(recvBuffer);
+    // Process data...
+    ProcessData(recvBuffer.AsSpan(0, received));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(recvBuffer);
 }
 ```
 
-**MessagePool Usage Pattern** (Recommended):
+**Message Usage Pattern**:
 ```csharp
 using Net.Zmq;
 
-// Send: Rent message from pool and send (automatic return)
-var sendMsg = MessagePool.Shared.Rent(dataSize);
+// Send: Use Message
+using var sendMsg = new Message(dataSize);
 sourceData.CopyTo(sendMsg.Data);
-socket.Send(sendMsg);  // Automatically returned via ZeroMQ free callback
+socket.Send(sendMsg);
 
-// Receive: Rent message from pool and receive
-var recvMsg = MessagePool.Shared.Rent(expectedSize);
-socket.Recv(recvMsg, expectedSize);
+// Receive: Use Message
+using var recvMsg = new Message();
+socket.Recv(recvMsg);
 // Process data...
-recvMsg.Dispose();  // Return to pool
+ProcessData(recvMsg.Data);
 ```
 
-**MessageZeroCopy Usage Pattern** (Special Cases):
+**MessageZeroCopy Usage Pattern** (Only when native memory already exists):
 ```csharp
 using Net.Zmq;
 using System.Runtime.InteropServices;
 
-// Allocate unmanaged memory
-nint nativePtr = Marshal.AllocHGlobal(dataSize);
-unsafe
-{
-    var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
-    sourceData.CopyTo(nativeSpan);
-}
+// Use only when native memory already exists
+// Example: memory received from another native library
+nint nativePtr = GetNativeMemoryFromSomewhereElse();
 
-// Transfer ownership to libzmq
+// Transfer ownership to libzmq (zero-copy)
 using var message = new Message(nativePtr, dataSize, ptr =>
 {
-    Marshal.FreeHGlobal(ptr); // Called when libzmq is done
+    // Called when libzmq is done
+    FreeNativeMemory(ptr);
 });
 
 socket.Send(message);
+
+// Note: In general cases, ArrayPool or Message are faster and simpler
 ```
 
 **GC Sensitivity**:
-- Applications sensitive to GC pauses should prefer ArrayPool (small messages) or Message (large messages)
-- Applications with infrequent messaging or small messages may find ByteArray acceptable
-- High-throughput applications benefit from GC-free strategies (ArrayPool, Message)
+- High-throughput applications sensitive to GC pauses should use **ArrayPool** (best for all sizes, GC-free)
+- Infrequent messaging or prototyping stages may find ByteArray simple and acceptable
+- Real-time or latency-critical applications require GC-free strategies (ArrayPool, Message)
 
 **Code Complexity**:
-- **ByteArray**: Simplest implementation with automatic memory management
-- **ArrayPool**: Requires explicit Rent/Return calls and buffer lifecycle tracking
-- **Message**: Native integration with moderate complexity
-- **MessageZeroCopy**: Requires unmanaged memory management and free callbacks
+- **ByteArray**: Simplest with automatic memory management, but generates GC pressure
+- **ArrayPool**: Requires explicit Rent/Return calls, but provides best performance/memory efficiency
+- **Message**: Can be used simply with using pattern, similar performance to ArrayPool for large messages
+- **MessageZeroCopy**: Requires complex memory management, slower than Message in most cases (only for special cases)
 
-**Performance Trade-offs**:
-- **Small messages (≤ 512B)**: Managed strategies (ByteArray, ArrayPool) have lower overhead
-- **Large messages (≥ 512B)**: Message delivers optimal performance
-- **Consistency**: GC-free strategies (ArrayPool, Message) provide more predictable timing
+**Performance Trade-offs Summary**:
+- **Small messages (≤ 1KB)**: ArrayPool is best (6-13% faster than ByteArray)
+- **Large messages (≥ 64KB)**: ArrayPool and Message are nearly equal, both significantly faster than ByteArray
+- **Very large messages (≥ 128KB)**: ArrayPool and Message are 3.5x+ faster than ByteArray
+- **Consistency**: ArrayPool provides best or near-best performance across all sizes
 
 ## Running Benchmarks
 

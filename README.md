@@ -191,26 +191,50 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## Performance
 
-### Recommended Approach
+### Recommended Message Strategies
 
-**Message Buffer Strategy: Use `MessagePool`**
-- Consistent performance across all message sizes
-- GC-free (native memory pooling)
-- Automatic return via ZeroMQ free callback (no manual management)
-- Up to 3x faster than ByteArray at 128KB+ messages
-- Avoids .NET Large Object Heap issues
+Net.Zmq provides multiple message buffer strategies to accommodate different performance requirements:
+
+**Available Strategies:**
+- **Basic Message**: Simple `Message` object for general use
+- **ArrayPool**: Uses `ArrayPool<byte>.Shared` for buffer reuse (manual return required)
+- **MessageZeroCopy**: Zero-copy messages using `Marshal.AllocHGlobal` for large data
+
+**Recommendations by Message Size:**
+- **Small messages (≤1KB)**: **`ArrayPool<byte>.Shared`** - Best performance with minimal GC pressure
+- **Large messages (≥64KB)**: **`MessageZeroCopy`** - Zero-copy semantics with minimal GC overhead
 
 **Receive Mode:**
 - Single socket → Blocking
 - Multiple sockets → `Poller`
 
 ```csharp
-// Recommended: MessagePool for sending (automatic return)
-var sendMsg = MessagePool.Shared.Rent(dataSize);
-sourceData.CopyTo(sendMsg.Data);
-socket.Send(sendMsg);  // Automatically returned to pool
+// Small messages: ArrayPool (recommended)
+var buffer = ArrayPool<byte>.Shared.Rent(size);
+try
+{
+    // Fill buffer with data
+    socket.Send(buffer.AsSpan(0, size));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
 
-// Recommended: Blocking receive with Message
+// Large messages: MessageZeroCopy
+nint nativePtr = Marshal.AllocHGlobal(dataSize);
+unsafe
+{
+    var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
+    sourceData.CopyTo(nativeSpan);
+}
+using var message = new Message(nativePtr, dataSize, ptr =>
+{
+    Marshal.FreeHGlobal(ptr); // Called when libzmq is done
+});
+socket.Send(message);
+
+// Receive: Blocking with Message
 using var msg = new Message();
 socket.Recv(msg);
 // Process msg.Data

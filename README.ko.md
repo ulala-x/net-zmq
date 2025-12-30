@@ -191,26 +191,50 @@ int linger = socket.GetOption<int>(SocketOption.Linger);
 
 ## 성능
 
-### 권장 방식
+### 권장 메시지 전략
 
-**메시지 버퍼 전략: `MessagePool` 사용**
-- 모든 메시지 크기에서 일관된 성능
-- GC 프리 (네이티브 메모리 풀링)
-- ZeroMQ free callback을 통한 자동 반환 (수동 관리 불필요)
-- 128KB 이상에서 ByteArray 대비 최대 3배 빠름
-- .NET Large Object Heap 문제 회피
+Net.Zmq는 다양한 성능 요구사항에 맞는 여러 메시지 버퍼 전략을 제공합니다:
+
+**사용 가능한 전략:**
+- **기본 Message**: 일반적인 용도의 간단한 `Message` 객체
+- **ArrayPool**: 버퍼 재사용을 위한 `ArrayPool<byte>.Shared` 사용 (수동 반환 필요)
+- **MessageZeroCopy**: 대용량 데이터를 위한 `Marshal.AllocHGlobal` 사용 제로카피 메시지
+
+**메시지 크기별 권장사항:**
+- **작은 메시지 (≤1KB)**: **`ArrayPool<byte>.Shared`** - 최고 성능, 최소 GC 부담
+- **대용량 메시지 (≥64KB)**: **`MessageZeroCopy`** - 제로카피 방식, 최소 GC 오버헤드
 
 **수신 모드:**
 - 단일 소켓 → Blocking
 - 다중 소켓 → `Poller`
 
 ```csharp
-// 권장: MessagePool으로 송신 (자동 반환)
-var sendMsg = MessagePool.Shared.Rent(dataSize);
-sourceData.CopyTo(sendMsg.Data);
-socket.Send(sendMsg);  // 풀에 자동 반환
+// 작은 메시지: ArrayPool (권장)
+var buffer = ArrayPool<byte>.Shared.Rent(size);
+try
+{
+    // 버퍼에 데이터 채우기
+    socket.Send(buffer.AsSpan(0, size));
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
 
-// 권장: Blocking 수신 + Message
+// 대용량 메시지: MessageZeroCopy
+nint nativePtr = Marshal.AllocHGlobal(dataSize);
+unsafe
+{
+    var nativeSpan = new Span<byte>((void*)nativePtr, dataSize);
+    sourceData.CopyTo(nativeSpan);
+}
+using var message = new Message(nativePtr, dataSize, ptr =>
+{
+    Marshal.FreeHGlobal(ptr); // libzmq가 완료되면 호출됨
+});
+socket.Send(message);
+
+// 수신: Blocking + Message
 using var msg = new Message();
 socket.Recv(msg);
 // msg.Data 처리
