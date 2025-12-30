@@ -9,6 +9,41 @@
 
 ## [출시 예정]
 
+## [0.5.0] - 2025-12-30
+
+### 제거됨 (Removed)
+- **MessagePool 완전 제거** - API 단순화를 위해 MessagePool 클래스 및 관련 코드 모두 삭제
+  - `MessagePool.cs` 삭제
+  - `MessagePoolTests.cs` 삭제
+  - `ReinitializeZmqMsgTests.cs` 삭제
+  - `Message.cs`에서 풀 관련 필드/메서드 제거 (`_poolDataPtr`, `_isFromPool`, `PrepareForReuse()` 등)
+  - `Socket.cs`에서 `Recv(Message, int expectSize)` 오버로드 제거
+  - 벤치마크에서 MessagePooled 관련 테스트 제거
+
+### 변경됨 (Changed)
+- **Message 클래스 단순화** - 풀링 관련 코드 제거로 더 깔끔한 구조
+  - `Size`, `Data`, `DataPtr` 속성에서 풀 관련 분기 제거
+  - `Send()`, `Dispose()` 메서드 단순화
+- **메시지 버퍼 전략 4가지로 정리**
+  - ByteArray (Baseline)
+  - ArrayPool (≤1KB 권장)
+  - Message
+  - MessageZeroCopy (특수 케이스용)
+
+### 문서 (Documentation)
+- **벤치마크 문서 전면 업데이트** (`docs/benchmarks.md`, `docs/benchmarks.ko.md`)
+  - MessagePool 관련 내용 모두 제거
+  - MessageZeroCopy 권장 제거 (대부분의 경우 Message보다 느림)
+  - GC 최적화 설정 섹션 추가 (Server GC + Batch Latency Mode)
+- **README 업데이트** - 4가지 전략 기반 권장사항
+- **벤치마크 README 업데이트** - 최신 결과 반영
+
+### 권장사항 (Recommendations)
+- **≤1KB 메시지**: ArrayPool 사용 (최고 성능, 최소 GC)
+- **≥64KB 메시지**: ArrayPool 또는 Message 사용
+- **≥128KB 메시지**: ArrayPool 또는 Message (ByteArray 대비 3.5배 이상 빠름)
+- **MessageZeroCopy**: 이미 네이티브 메모리가 있는 특수한 경우에만 사용
+
 ## [0.4.1] - 2025-12-27
 
 ### 추가됨 (Added)

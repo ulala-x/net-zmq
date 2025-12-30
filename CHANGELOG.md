@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-12-30
+
+### Removed
+- **MessagePool completely removed** - Removed MessagePool class and all related code for API simplification
+  - Deleted `MessagePool.cs`
+  - Deleted `MessagePoolTests.cs`
+  - Deleted `ReinitializeZmqMsgTests.cs`
+  - Removed pool-related fields/methods from `Message.cs` (`_poolDataPtr`, `_isFromPool`, `PrepareForReuse()`, etc.)
+  - Removed `Recv(Message, int expectSize)` overload from `Socket.cs`
+  - Removed MessagePooled benchmarks
+
+### Changed
+- **Simplified Message class** - Cleaner structure after removing pooling-related code
+  - Removed pool-related branches from `Size`, `Data`, `DataPtr` properties
+  - Simplified `Send()`, `Dispose()` methods
+- **Consolidated to 4 message buffer strategies**
+  - ByteArray (Baseline)
+  - ArrayPool (recommended for ≤1KB)
+  - Message
+  - MessageZeroCopy (special cases only)
+
+### Documentation
+- **Complete benchmark documentation update** (`docs/benchmarks.md`, `docs/benchmarks.ko.md`)
+  - Removed all MessagePool content
+  - Removed MessageZeroCopy recommendation (slower than Message in most cases)
+  - Added GC optimization settings section (Server GC + Batch Latency Mode)
+- **README update** - Recommendations based on 4 strategies
+- **Benchmark README update** - Reflects latest results
+
+### Recommendations
+- **≤1KB messages**: Use ArrayPool (best performance, minimal GC)
+- **≥64KB messages**: Use ArrayPool or Message
+- **≥128KB messages**: Use ArrayPool or Message (3.5x+ faster than ByteArray)
+- **MessageZeroCopy**: Only for special cases when native memory already exists
+
 ## [0.4.1] - 2025-12-27
 
 ### Added
